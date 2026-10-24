@@ -241,7 +241,7 @@ details summary{cursor:pointer}
 </head><body><div id="app"></div>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
 <script src="config.js"></script>
-<script>window.AM_VER='v25.6';</script><script>
+<script>window.AM_VER='v25.7';</script><script>
 /* ===== AM Test Lux — web platform (Supabase) =====
    The app talks to one small API (Data API v1, see web/API.md):
      db.doc(path).get/set/update/delete/onSnapshot · db.collection(path).get/onSnapshot/doc
@@ -256,6 +256,9 @@ const colOf = p => p.replace(/\/[^/]+$/, ''), tbl = p => BLOB.test(colOf(p)) ? '
 const clone = d => d==null ? d : JSON.parse(JSON.stringify(d));
 const snapDoc = (path, data) => ({exists: data!=null, id: path.split('/').pop(), ref: {path}, data: () => data==null ? undefined : clone(data)});
 const fail = (e, what) => { const x = new Error((what ? what+': ' : '')+(e && e.message || String(e))); x.code = e && e.code; return x; };
+/* ID accounts (no real e-mail): "mck-client1" signs in as mck-client1@user.amtestlux.app — set by the Admin in 👥 สิทธิ์ */
+const ID_DOMAIN = 'user.amtestlux.app', toEmail = l => { l = String(l||'').trim().toLowerCase(); return l.includes('@') ? l : l+'@'+ID_DOMAIN; };
+const loginOf = e => String(e||'').endsWith('@'+ID_DOMAIN) ? String(e).slice(0, -ID_DOMAIN.length-1) : String(e||'');
 const isUuid = s => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(s));
 let sb = null, me = null, prof = null, live = null;
 
@@ -328,7 +331,7 @@ async function resync(){
 let netOk = true; function setNet(ok){ netOk = ok; const el = document.getElementById('am-net'); if(el) el.hidden = ok; }
 
 /* ---------- user ---------- */
-const P = r => ({id:r.id, name:r.name||'', email:r.email||null, avatarUrl:'', color:'#8A6A3B', isMe:r.id===me, guest:false});
+const P = r => ({id:r.id, name:r.name||loginOf(r.email), email:loginOf(r.email)||null, avatarUrl:'', color:'#8A6A3B', isMe:r.id===me, guest:false});
 const user = {
   id: async () => me, isOwner: async () => !!(prof && prof.is_owner),
   can: async n => n==='data.write' ? true : null,          // the database decides what each person may write
@@ -356,51 +359,65 @@ function screen(title, sub, body){
 function field(label, input){ return el('label',{class:'am-fl'}, el('span',null,label), input); }
 function loginScreen(msg0){
   return new Promise(done => {
-    const em = el('input',{type:'email',id:'am-email',autocomplete:'username',required:'',placeholder:'name@company.com'});
+    const em = el('input',{type:'text',id:'am-email',autocomplete:'username',required:'',placeholder:'ID หรืออีเมล',autocapitalize:'none',spellcheck:'false'});
     const pw = el('input',{type:'password',id:'am-pass',autocomplete:'current-password',required:''});
     const msg = el('div',{class:'note',id:'am-msg',role:'status'}, msg0||''), go = el('button',{class:'btn primary',type:'submit',id:'am-login'},'เข้าสู่ระบบ');
     const forgot = el('button',{class:'btn ghost sm',type:'button',id:'am-forgot',on:{click:async () => {
       if(!em.value.trim()){ msg.textContent = 'ใส่อีเมลก่อน แล้วกด "ลืมรหัสผ่าน" อีกครั้ง'; em.focus(); return; }
+      if(!em.value.includes('@')){ msg.textContent = 'บัญชีแบบ ID: ติดต่อ Admin ให้ตั้งรหัสผ่านใหม่ให้'; return; }
       const {error} = await sb.auth.resetPasswordForEmail(em.value.trim(), {redirectTo: location.origin+location.pathname});
       msg.textContent = error ? 'ส่งไม่สำเร็จ: '+error.message : 'ส่งลิงก์ตั้งรหัสผ่านใหม่ไปที่อีเมลแล้ว (ดูในกล่องจดหมาย / Junk)'; }}}, 'ลืมรหัสผ่าน');
     const form = el('form',{class:'am-form',on:{submit:async e => { e.preventDefault(); go.disabled = true; msg.textContent = 'กำลังเข้าสู่ระบบ…';
-      const {data, error} = await sb.auth.signInWithPassword({email: em.value.trim(), password: pw.value});
-      go.disabled = false; if(error){ msg.textContent = /invalid/i.test(error.message) ? 'อีเมลหรือรหัสผ่านไม่ถูกต้อง' : 'เข้าไม่ได้: '+error.message; return; }
-      done(data.session); }}}, field('อีเมล', em), field('รหัสผ่าน', pw), msg, el('div',{class:'row'}, forgot, el('span',{class:'sp'}), go));
+      const {data, error} = await sb.auth.signInWithPassword({email: toEmail(em.value), password: pw.value});
+      go.disabled = false; if(error){ msg.textContent = /invalid/i.test(error.message) ? 'ID / อีเมล หรือรหัสผ่านไม่ถูกต้อง' : /banned/i.test(error.message) ? 'บัญชีนี้ถูกระงับ — ติดต่อ Admin' : 'เข้าไม่ได้: '+error.message; return; }
+      done(data.session); }}}, field('ID หรืออีเมล', em), field('รหัสผ่าน', pw), msg, el('div',{class:'row'}, forgot, el('span',{class:'sp'}), go));
     screen('เข้าสู่ระบบ', 'บัญชีสร้างโดย Admin ของ AM Electric — ถ้ายังไม่มี ติดต่อ Admin', form); em.focus();
   });
 }
 function setPwScreen(kind){
   return new Promise(done => {
     const a = el('input',{type:'password',id:'am-new1',autocomplete:'new-password',minlength:'8',required:''}), b = el('input',{type:'password',id:'am-new2',autocomplete:'new-password',required:''});
-    const nm = kind==='invite' ? el('input',{type:'text',id:'am-name',maxlength:'60',placeholder:'ชื่อ-นามสกุล'}) : null;
+    const nm = kind==='invite' || kind==='first' ? el('input',{type:'text',id:'am-name',maxlength:'60',placeholder:'ชื่อ-นามสกุล'}) : null;
     const msg = el('div',{class:'note',id:'am-msg',role:'status'}), go = el('button',{class:'btn primary',type:'submit',id:'am-setpw'},'บันทึกรหัสผ่าน');
     const form = el('form',{class:'am-form',on:{submit:async e => { e.preventDefault();
       if(a.value.length < 8){ msg.textContent = 'รหัสผ่านอย่างน้อย 8 ตัว'; return; } if(a.value!==b.value){ msg.textContent = 'รหัสผ่าน 2 ช่องไม่ตรงกัน'; return; }
-      go.disabled = true; const {error} = await sb.auth.updateUser({password: a.value}); go.disabled = false;
+      go.disabled = true; const {error} = await sb.auth.updateUser({password: a.value, data:{must_change:false}}); go.disabled = false;
       if(error){ msg.textContent = 'ตั้งรหัสไม่สำเร็จ: '+error.message; return; }
       if(nm && nm.value.trim()) await sb.from('profiles').update({name: nm.value.trim()}).eq('id', me);
       history.replaceState(null, '', location.pathname+location.search); done(); }}},
       nm ? field('ชื่อที่ให้ทีมเห็น', nm) : null, field('รหัสผ่านใหม่ (อย่างน้อย 8 ตัว)', a), field('ยืนยันรหัสผ่าน', b), msg, el('div',{class:'row'}, el('span',{class:'sp'}), go));
-    screen(kind==='invite' ? 'ตั้งรหัสผ่านครั้งแรก' : 'ตั้งรหัสผ่านใหม่', 'ใช้อีเมล '+((prof && prof.email) || '')+' เข้าระบบครั้งต่อไป', form); a.focus();
+    if(nm && prof && prof.name) nm.value = prof.name;
+    screen(kind==='invite' || kind==='first' ? 'ตั้งรหัสผ่านของคุณ' : 'ตั้งรหัสผ่านใหม่', (kind==='first' ? 'บัญชีนี้ Admin สร้างให้ — ตั้งรหัสผ่านของคุณเองก่อนใช้งาน · ' : '')+'ใช้ '+(loginOf(prof && prof.email) || '')+' เข้าระบบครั้งต่อไป', form); a.focus();
   });
 }
 
 /* ---------- header pieces the app shows on the web build ---------- */
 window.AM_WEB = true;
+/* Admin account tools → Edge Function "am-admin" (holds the privileged key on the server; checks the caller is Admin) */
+async function adminCall(body){
+  const {data, error} = await sb.functions.invoke('am-admin', {body});
+  if(error){ let m = error.message; try{ const j = await error.context.json(); if(j && j.error) m = j.error; }catch(e){} throw new Error(m); }
+  if(data && data.error) throw new Error(data.error); return data;
+}
+window.AM_ADMIN = {
+  list: async () => ((await adminCall({action:'list'})).users||[]).map(u => Object.assign(u, {login:loginOf(u.email)})),
+  create: async o => { const r = await adminCall(Object.assign({action:'create'}, o)); return {id:r.id, login:loginOf(r.email)}; },
+  password: (uid, password) => adminCall({action:'password', uid, password}),
+  ban: (uid, on) => adminCall({action:'ban', uid, on:!!on}),
+};
 window.AM_HDR = () => {
   const out = [];
   const net = el('span',{class:'pill',id:'am-net',title:'การเชื่อมต่อสดหลุด — ข้อมูลอาจไม่ล่าสุด ระบบจะต่อใหม่เอง'}, '⚠ ออฟไลน์'); net.hidden = netOk; out.push(net);
-  out.push(el('button',{class:'thbtn',id:'am-acct',title:(prof && prof.email)||'',on:{click:acctMenu}}, '👤', el('span',{class:'tx'}, ' '+(((prof && prof.name) || (prof && prof.email) || '').split(' ')[0] || 'บัญชี'))));
+  out.push(el('button',{class:'thbtn',id:'am-acct',title:loginOf(prof && prof.email),on:{click:acctMenu}}, '👤', el('span',{class:'tx'}, ' '+(((prof && prof.name) || loginOf(prof && prof.email) || '').split(' ')[0] || 'บัญชี'))));
   return out;
 };
 function acctMenu(){
   const ov = el('div',{class:'ov',role:'dialog','aria-modal':'true','aria-label':'บัญชีของฉัน'}), close = () => ov.remove();
   const nm = el('input',{type:'text',id:'am-myname',value:(prof && prof.name)||'',maxlength:'60'}), msg = el('div',{class:'note',role:'status'});
   ov.append(el('div',{class:'sheet'}, el('div',{class:'hd'}, el('h2',null,'บัญชีของฉัน'), el('span',{class:'sp'}), el('button',{class:'btn ghost sm','aria-label':'ปิด',on:{click:close}},'✕')),
-    el('div',{class:'am-form'}, el('div',{class:'note'}, 'อีเมล: ', el('b',null,(prof && prof.email)||'')), field('ชื่อที่ให้ทีมเห็น', nm), msg, VER ? el('div',{class:'note mono'}, 'เวอร์ชัน '+VER) : null),
+    el('div',{class:'am-form'}, el('div',{class:'note'}, (String((prof && prof.email)||'').endsWith('@'+ID_DOMAIN) ? 'ID: ' : 'อีเมล: '), el('b',null,loginOf(prof && prof.email))), field('ชื่อที่ให้ทีมเห็น', nm), msg, VER ? el('div',{class:'note mono'}, 'เวอร์ชัน '+VER) : null),
     el('div',{class:'row',style:'justify-content:flex-end'},
-      el('button',{class:'btn',on:{click:async () => { await sb.auth.resetPasswordForEmail(prof.email, {redirectTo: location.origin+location.pathname}); msg.textContent = 'ส่งลิงก์เปลี่ยนรหัสผ่านไปที่อีเมลแล้ว'; }}}, 'เปลี่ยนรหัสผ่าน'),
+      el('button',{class:'btn',id:'am-chpw',on:{click:() => { close(); setPwScreen('change').then(() => location.reload()); }}}, 'เปลี่ยนรหัสผ่าน'),
       el('button',{class:'btn',id:'am-name-save',on:{click:async () => { const v = nm.value.trim().slice(0, 60); const {error} = await sb.from('profiles').update({name:v}).eq('id', me); if(!error && prof) prof.name = v; msg.textContent = error ? 'บันทึกไม่สำเร็จ' : 'บันทึกชื่อแล้ว'; }}}, 'บันทึกชื่อ'),
       el('button',{class:'btn primary',id:'am-logout',on:{click:async () => { await sb.auth.signOut(); location.reload(); }}}, 'ออกจากระบบ'))));
   document.body.append(ov);
@@ -416,6 +433,7 @@ window.AM_PRE = async () => {
   me = session.user.id;
   const r = await sb.from('profiles').select('id,name,email,is_owner').eq('id', me).maybeSingle(); prof = r.data || {id:me, email:session.user.email, name:'', is_owner:false};
   if(kind) await setPwScreen(kind);
+  else if(session.user.user_metadata && session.user.user_metadata.must_change) await setPwScreen('first');
   sb.auth.onAuthStateChange(ev => { if(ev==='SIGNED_OUT') location.reload(); });
   startLive();
   window.claude = {use: async n => n==='db' ? db : n==='user' ? user : n==='downloads' ? downloads : null};
@@ -3565,12 +3583,15 @@ function rolesDlg(){
   const ppl = new Set(A.ppl||[]), hid = new Set(A.hid||[]);
   /* nicknames set by the Admin (อ่ำ 24 ต.ค.): people outside the organization show no name — nm[userId] = 'ชื่อที่ Admin ตั้ง' */
   const nm = Object.assign({}, A.nm||{});
-  const nmOf = (id, p) => (p && p.name) || nm[id] || 'ผู้ใช้ (ไม่แสดงชื่อ)';
+  const nmOf = (id, p) => (p && p.name) || nm[id] || (accts[id] && (accts[id].name || accts[id].login)) || 'ผู้ใช้ (ไม่แสดงชื่อ)';
+  /* web build: ID / password accounts made by the Admin (อ่ำ 24 ต.ค.) — server function am-admin, see web/am-admin.ts */
+  const AC = window.AM_ADMIN || null, accts = {};
+  const loadAccts = async () => { if(!AC) return; try{ (await AC.list()).forEach(u => { accts[u.id] = u; }); draw(); }catch(e){ msg.textContent = 'โหลดรายชื่อบัญชีไม่ได้: '+errMsg(e); } };
   const list = h('div',{class:'rl-list',id:'rl-list'}), msg = h('div',{class:'note',id:'rl-msg',role:'status'});
   const OPTS = [['','ค่าเริ่มต้น'],['admin','Admin'],['team','ทีมงาน'],['client','ลูกค้า']];
   const ago = t => { if(!t) return ''; const d = (Date.now()-Date.parse(t))/864e5; return d < 1 ? 'เปิดล่าสุดวันนี้' : 'เปิดล่าสุด '+Math.round(d)+' วันก่อน'; };
   const draw = async () => {
-    const ids = [...new Set([S.me, ...Object.keys(m), ...Object.keys(seen), ...ppl, ...Object.values(pm).flatMap(o => Object.keys(o||{}))])].filter(id => id && (id===S.me || !hid.has(id)));
+    const ids = [...new Set([S.me, ...Object.keys(m), ...Object.keys(seen), ...Object.keys(accts), ...ppl, ...Object.values(pm).flatMap(o => Object.keys(o||{}))])].filter(id => id && (id===S.me || !hid.has(id)));
     let ps = {}; try{ ps = S.user && S.user.profiles ? await S.user.profiles(ids) : {}; }catch(e){ ps = {}; }
     ids.sort((a, b) => (a===S.me ? -1 : b===S.me ? 1 : 0) || String((ps[a]||{}).name||'~').localeCompare(String((ps[b]||{}).name||'~')));
     list.replaceChildren(...ids.map(id => {
@@ -3583,12 +3604,23 @@ function rolesDlg(){
         nb.replaceWith(inp); inp.focus(); }}}, '✎');
       const nmRow = h('span',{class:'rl-nmr'}, nb, ren);
       const av = h('img',{class:'rl-av',alt:'',src:p.avatarUrl||''}); if(!p.avatarUrl) av.hidden = true;
-      const sub = h('span',{class:'note'}, [p.guest ? 'ภายนอกองค์กร' : '', ago((seen[id]||{}).at)].filter(Boolean).join(' · '));
+      const ac = accts[id];
+      const sub = h('span',{class:'note'}, [p.guest ? 'ภายนอกองค์กร' : '', ac ? 'ID: '+ac.login : '', ac && ac.banned ? '⛔ ระงับอยู่' : '', ac ? (ac.last ? ago(ac.last).replace('เปิด', 'เข้า') : 'ยังไม่เคยเข้า') : ago((seen[id]||{}).at)].filter(Boolean).join(' · '));
+      /* account tools: new password / suspend (not for yourself or the owner) */
+      const tools = AC && ac && !mine && id!==S.me && !ac.owner ? h('span',{class:'rl-acc'},
+        h('button',{class:'btn ghost sm','data-pw':id,title:'ตั้งรหัสผ่านใหม่ให้คนนี้',on:{click:e => {
+          const box = h('span',{class:'rl-pwbox'}), inp = h('input',{type:'text',class:'rl-nmin',placeholder:'รหัสใหม่ ≥ 8 ตัว',autocomplete:'off',spellcheck:'false'});
+          const ok = h('button',{class:'btn sm primary',on:{click:async () => { if(inp.value.length < 8){ msg.textContent = 'รหัสผ่านอย่างน้อย 8 ตัว'; return; } ok.disabled = true;
+            try{ await AC.password(id, inp.value); msg.textContent = 'ตั้งรหัสใหม่ให้ '+nmOf(id, p)+' แล้ว — ส่ง ID: '+ac.login+' / รหัส: '+inp.value+' ให้เขา (เข้าครั้งแรกระบบให้ตั้งรหัสเอง)'; box.remove(); }catch(er){ msg.textContent = 'ตั้งรหัสไม่สำเร็จ: '+errMsg(er); ok.disabled = false; } }}}, 'ตั้ง');
+          inp.value = genPass(); box.append(inp, ok); e.currentTarget.replaceWith(box); inp.focus(); inp.select(); }}}, '🔑 รหัสใหม่'),
+        h('button',{class:'btn ghost sm','data-ban':id,title:ac.banned ? 'เปิดให้เข้าใช้งานได้อีกครั้ง' : 'ระงับไม่ให้เข้าใช้งาน (ข้อมูลที่เคยกรอกยังอยู่)',on:{click:async e => { const b = e.currentTarget;
+          if(!b.dataset.arm){ b.dataset.arm = '1'; b.textContent = 'กดอีกครั้ง'; return; } b.disabled = true;
+          try{ await AC.ban(id, !ac.banned); ac.banned = !ac.banned; msg.textContent = (ac.banned ? 'ระงับ ' : 'เปิดใช้ ')+nmOf(id, p)+' แล้ว'; draw(); }catch(er){ msg.textContent = 'ไม่สำเร็จ: '+errMsg(er); b.disabled = false; } }}}, ac.banned ? 'เปิดใช้' : 'ระงับ')) : null;
       const right = mine ? h('span',{class:'pill acc'}, h('i'), 'เจ้าของ · Admin เสมอ')
         : (() => { const s2 = sel(OPTS, m[id]||'', v => { if(v) m[id] = v; else delete m[id]; dirty = true; msg.textContent = 'ยังไม่บันทึก'; }, 'สิทธิ์ของ '+nmOf(id, p)); s2.style.cssText = 'width:auto;min-height:36px'; s2.dataset.uid = id; return s2; })();
       const del = mine || id===S.me ? null : h('button',{class:'btn ghost sm rl-del','data-del':id,title:'เอาออกจากรายชื่อ (ลบสิทธิ์หลักและสิทธิ์ทุกโครงการของคนนี้)',on:{click:e => { const b = e.currentTarget; if(!b.dataset.arm){ b.dataset.arm = '1'; b.textContent = 'กดอีกครั้ง'; return; }
         delete m[id]; delete nm[id]; Object.values(pm).forEach(o => { if(o) delete o[id]; }); ppl.delete(id); hid.add(id); dirty = true; msg.textContent = 'ยังไม่บันทึก · คนที่เอาออกยังเปิดลิงก์ได้ถ้ายังแชร์ให้อยู่ — ตัดสิทธิ์จริงที่ปุ่ม Share'; draw(); }}}, 'ลบ');
-      return h('div',{class:'rl-row','data-uid':id}, av, h('div',{class:'rl-nm'}, nmRow, sub), right, del);
+      return h('div',{class:'rl-row','data-uid':id}, av, h('div',{class:'rl-nm'}, nmRow, sub, tools), right, del);
     }));
     /* per project */
     if(!curP){ plist.replaceChildren(h('div',{class:'note'},'ยังไม่มีโครงการ')); return; }
@@ -3609,7 +3641,7 @@ function rolesDlg(){
     const r = await S.user.search(q.value.trim());
     hits.replaceChildren(...(r||[]).filter(p => p.id && p.id!==S.me).map(p => { const t = h('span'); t.textContent = p.name+(p.email ? ' · '+p.email : '');
       return h('button',{class:'btn sm ghost rl-hit','data-uid':p.id,on:{click:() => { if(addTo.value==='proj' && curP){ (pm[curP] = pm[curP]||{})[p.id] = addRole.value; } else m[p.id] = addRole.value; ppl.add(p.id); hid.delete(p.id); dirty = true; msg.textContent = 'ยังไม่บันทึก'; q.value = ''; hits.replaceChildren(); draw(); }}}, '+ ', t); }),
-      ...((r||[]).length ? [] : [(q.value.trim() ? (window.AM_WEB ? h('div',{class:'note rl-miss'}, h('b',null,'ไม่พบผู้ใช้'), ' — สร้างบัญชีก่อนที่ Supabase → Authentication → Users → Invite user แล้วค้นหาอีกครั้ง') : h('div',{class:'note rl-miss'}, h('b',null,'ไม่พบในองค์กร'), ' — ช่องนี้ค้นได้เฉพาะคนในองค์กร claude.ai ของคุณ (ค้นด้วยชื่อ) · คนนอกองค์กร เช่น อีเมล Gmail ส่วนตัว: ถ้าแชร์ให้ใช้งานได้ (Contributor ขึ้นไป) ให้เขาเปิดลิงก์ 1 ครั้ง ชื่อจะขึ้นในรายชื่อเอง · ถ้าแชร์ให้ดูอย่างเดียว ใช้ "เพิ่มด้วยรหัส" ด้านล่าง')) : h('div',{class:'note'}, ''))]));
+      ...((r||[]).length ? [] : [(q.value.trim() ? (window.AM_WEB ? h('div',{class:'note rl-miss'}, h('b',null,'ไม่พบผู้ใช้'), ' — สร้างบัญชีที่กล่อง "สร้างบัญชีใหม่" ด้านบน') : h('div',{class:'note rl-miss'}, h('b',null,'ไม่พบในองค์กร'), ' — ช่องนี้ค้นได้เฉพาะคนในองค์กร claude.ai ของคุณ (ค้นด้วยชื่อ) · คนนอกองค์กร เช่น อีเมล Gmail ส่วนตัว: ถ้าแชร์ให้ใช้งานได้ (Contributor ขึ้นไป) ให้เขาเปิดลิงก์ 1 ครั้ง ชื่อจะขึ้นในรายชื่อเอง · ถ้าแชร์ให้ดูอย่างเดียว ใช้ "เพิ่มด้วยรหัส" ด้านล่าง')) : h('div',{class:'note'}, ''))]));
   };
   const addTo = sel([['all','เป็นสิทธิ์หลัก (ทุกโครงการ)'],['proj','เฉพาะโครงการที่เลือกด้านล่าง']], 'all', () => {}, 'เพิ่มเป็นสิทธิ์แบบไหน'); addTo.id = 'rl-addto'; addTo.style.cssText = 'width:auto;min-height:40px';
   /* add by user code (อ่ำ 24 ต.ค.): view-only guests cannot register themselves, so they copy their code (🪪 รหัสของฉัน) and send it */
@@ -3623,16 +3655,50 @@ function rolesDlg(){
     if(addTo.value==='proj' && curP){ (pm[curP] = pm[curP]||{})[t.id] = addRole.value; } else m[t.id] = addRole.value;
     ppl.add(t.id); hid.delete(t.id); dirty = true; msg.textContent = 'ยังไม่บันทึก';
     cMsg.textContent = 'เพิ่ม '+(name||'ผู้ใช้')+' แล้ว'+(addTo.value==='proj' && curP ? ' (เฉพาะโครงการที่เลือก)' : ' (สิทธิ์หลัก)')+' — กดบันทึก'; cIn.value = ''; cNm.value = ''; draw(); }}}, '+ เพิ่มด้วยรหัส');
+  /* create an ID / password account (web) */
+  const acLogin = h('input',{type:'text',id:'ac-login',placeholder:'ID เช่น mck-client1 (หรืออีเมล)',autocomplete:'off',spellcheck:'false',maxlength:'60'});
+  const acName = h('input',{type:'text',id:'ac-name',placeholder:'ชื่อที่แสดง เช่น คุณนาวพงษ์ (McKinsey)',maxlength:'60',autocomplete:'off'});
+  const acPass = h('input',{type:'text',id:'ac-pass',placeholder:'รหัสผ่านเริ่มต้น ≥ 8 ตัว',autocomplete:'off',spellcheck:'false',maxlength:'72'});
+  const acMsg = h('div',{class:'note',id:'ac-msg',role:'status'}), acOut = h('div',{id:'ac-out'});
+  const acGen = h('button',{class:'btn ghost sm',id:'ac-gen',type:'button',title:'สุ่มรหัสผ่าน',on:{click:() => { acPass.value = genPass(); }}}, '🎲 สุ่ม');
+  const acGo = h('button',{class:'btn primary',id:'ac-create',on:{click:async () => {
+    const login = acLogin.value.trim().toLowerCase(), pass = acPass.value, name = acName.value.trim();
+    if(!/^[a-z0-9._-]{3,40}$/.test(login) && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(login)){ acMsg.textContent = 'ID ใช้ได้เฉพาะ a-z 0-9 . _ - (3–40 ตัว) หรือใส่เป็นอีเมล'; acLogin.focus(); return; }
+    if(pass.length < 8){ acMsg.textContent = 'รหัสผ่านอย่างน้อย 8 ตัว'; acPass.focus(); return; }
+    acGo.disabled = true; acMsg.textContent = 'กำลังสร้างบัญชี…';
+    try{
+      const u = await AC.create({login, password:pass, name});
+      const proj = addTo.value==='proj' && curP; if(proj){ (pm[curP] = pm[curP]||{})[u.id] = addRole.value; } else m[u.id] = addRole.value;
+      ppl.add(u.id); hid.delete(u.id); accts[u.id] = {id:u.id, login:u.login||login, banned:false, last:null}; dirty = true;
+      const saved = await saveRoles();
+      const role = {admin:'Admin', team:'ทีมงาน', client:'ลูกค้า'}[addRole.value]+(proj ? ' เฉพาะ '+((S.projects[curP]||{}).name||'') : ' (ทุกโครงการ)');
+      const txt = 'AM Test Lux\nเว็บ: '+location.origin+location.pathname+'\nID: '+(u.login||login)+'\nรหัสผ่านเริ่มต้น: '+pass+'\nเข้าครั้งแรกระบบจะให้ตั้งรหัสผ่านใหม่';
+      const ta = h('textarea',{rows:'5',readonly:'readonly',class:'mono',id:'ac-text'}); ta.value = txt;
+      acOut.replaceChildren(h('div',{class:'banner'}, h('b',null,'สร้างบัญชี '+(name||login)+' แล้ว · สิทธิ์ '+role+(saved ? '' : ' (ยังไม่ได้บันทึกสิทธิ์ — กดบันทึก)')), ta,
+        h('button',{class:'btn sm',id:'ac-copy',on:{click:() => { try{ navigator.clipboard.writeText(txt).then(() => toast('คัดลอกแล้ว'), () => { ta.focus(); ta.select(); }); }catch(e){ ta.focus(); ta.select(); } }}}, 'คัดลอกข้อความส่งให้ผู้ใช้')));
+      acMsg.textContent = ''; acLogin.value = ''; acName.value = ''; acPass.value = ''; draw();
+    }catch(e){ acMsg.textContent = 'สร้างไม่สำเร็จ: '+errMsg(e); }
+    acGo.disabled = false;
+  }}}, '+ สร้างบัญชี');
   q.addEventListener('input', find); q.addEventListener('focus', find);
   const defSeg = h('span',{class:'seg',id:'rl-def'}, [['team','ทีมงาน'],['client','ลูกค้า']].map(([k, l]) => h('button',{'aria-pressed':String(defW===k),'data-v':k,on:{click:e => { defW = k; dirty = true; msg.textContent = 'ยังไม่บันทึก'; e.currentTarget.parentNode.querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.v===k))); }}}, l)));
   const tbl = h('table',{class:'t rl-tbl'}, h('thead',null, h('tr',null, ['สิทธิ์','ตั้งค่า','กรอกค่า','ผลลัพธ์','รายงาน'].map(x => h('th',null,x)))),
     h('tbody',null, [['Admin',1,1,1,1,'+ จัดการสิทธิ์'],['ทีมงาน',0,1,1,1,''],['ลูกค้า',0,0,1,1,'ดู / ดาวน์โหลด']].map(([n, ...f]) => h('tr',null, h('td',null, h('b',null,n), f[4] ? h('div',{class:'note'}, f[4]) : null), f.slice(0, 4).map(x => h('td',{class:'c'}, x ? '✓' : '–'))))));
   const view = h('span',{class:'seg',id:'rl-view'}, [['','Admin'],['team','ทีมงาน'],['client','ลูกค้า']].map(([k, l]) => h('button',{'aria-pressed':String((S.viewAs||'')===k),'data-v':k,on:{click:() => { close(); S.viewAs = k; roleCalc(); S.route.tab = ''; render(); window.scrollTo(0, 0); }}}, l)));
+  async function saveRoles(){
+      Object.keys(pm).forEach(k => { if(!Object.keys(pm[k]||{}).length) delete pm[k]; });
+      Object.keys(m).forEach(k => ppl.add(k)); Object.values(pm).forEach(o => Object.keys(o||{}).forEach(k => ppl.add(k)));
+      const ok = await act(() => S.db.doc('access/roles').set({m, defW, p:pm, pv, ppl:[...ppl].filter(k => !hid.has(k)), nm:Object.fromEntries(Object.entries(nm).filter(([k]) => !hid.has(k))), hid:[...hid].filter(k => !ppl.has(k) || !m[k]), at:nowIso(), by:S.me}), 'บันทึกสิทธิ์แล้ว');
+      if(ok){ dirty = false; msg.textContent = 'บันทึกแล้ว'; } return ok;
+  }
   const close = dialog('ผู้ใช้และสิทธิ์', h('div',{class:'rl'},
     h('div',{class:'tbl-wrap'}, tbl),
-    h('div',{class:'note'}, window.AM_WEB ? 'บัญชีผู้ใช้สร้างที่ Supabase → Authentication → Users (Invite) · หน้านี้กำหนดสิทธิ์ และฐานข้อมูลบังคับตามนี้จริง' : 'ใครเปิดลิงก์ได้ และใครแก้ข้อมูลได้ ตั้งที่ปุ่ม Share ของ claude.ai — คนที่แชร์ให้แบบดูอย่างเดียวเป็นลูกค้าเสมอ · หน้านี้กำหนดว่าแต่ละคนเห็นแท็บไหน'),
-    h('h3',null,'คนที่ยังไม่ได้กำหนด (และแชร์ให้แก้ไขได้) เป็น'), defSeg,
+    h('div',{class:'note'}, window.AM_WEB ? 'สร้างบัญชี ID / รหัสผ่าน ได้ที่กล่อง "สร้างบัญชีใหม่" ด้านล่าง · หน้านี้กำหนดสิทธิ์ และฐานข้อมูลบังคับตามนี้จริง' : 'ใครเปิดลิงก์ได้ และใครแก้ข้อมูลได้ ตั้งที่ปุ่ม Share ของ claude.ai — คนที่แชร์ให้แบบดูอย่างเดียวเป็นลูกค้าเสมอ · หน้านี้กำหนดว่าแต่ละคนเห็นแท็บไหน'),
+    h('h3',null, window.AM_WEB ? 'บัญชีที่ยังไม่ได้กำหนดสิทธิ์ เป็น' : 'คนที่ยังไม่ได้กำหนด (และแชร์ให้แก้ไขได้) เป็น'), defSeg,
     h('h3',null,'รายชื่อ'), list,
+    AC ? h('div',{class:'rl-code',id:'ac-box'}, h('b',null,'สร้างบัญชีใหม่ (ID / รหัสผ่าน)'), h('div',{class:'note'},'อ่ำเป็นคนตั้ง ID และรหัสผ่านเริ่มต้น แล้วส่งให้ผู้ใช้ · สิทธิ์ใช้ตามช่อง "สิทธิ์" และ "เพิ่มเป็น" ด้านล่าง · เข้าครั้งแรกผู้ใช้ต้องตั้งรหัสใหม่เอง (อ่ำจะไม่รู้รหัสหลังจากนั้น)'),
+      h('div',{class:'row'}, h('div',{style:'flex:1 1 180px;min-width:0'}, acLogin), h('div',{style:'flex:1 1 200px;min-width:0'}, acName)),
+      h('div',{class:'row'}, h('div',{style:'flex:1 1 180px;min-width:0'}, acPass), acGen, acGo), acMsg, acOut) : null,
     h('div',{class:'row'}, h('div',{style:'flex:1 1 220px;min-width:0'}, q), addRole, addTo), hits,
     window.AM_WEB ? null : h('div',{class:'rl-code'}, h('b',null,'คนนอกองค์กร / ลูกค้าที่แชร์ให้ดูอย่างเดียว'), h('div',{class:'note'},'ให้เขาเปิดลิงก์ → กดปุ่ม 🪪 รหัสของฉัน มุมบนขวา → คัดลอกส่งมาทาง LINE → วางที่ช่องนี้ (ใช้สิทธิ์และ "เพิ่มเป็น" จากช่องด้านบน)'),
       h('div',{class:'row'}, h('div',{style:'flex:2 1 220px;min-width:0'}, cIn), h('div',{style:'flex:1 1 140px;min-width:0'}, cNm), cAdd), cMsg),
@@ -3642,12 +3708,9 @@ function rolesDlg(){
     h('h3',null,'ทดลองดูในมุมมองของ'), view, h('div',{class:'note'}, 'ใช้ตรวจว่าทีมงาน / ลูกค้าเห็นอะไร — ไม่เปลี่ยนสิทธิ์ของใคร'), msg),
     cls => [h('button',{class:'btn',on:{click:cls}},'ปิด'), h('button',{class:'btn primary',id:'rl-save',on:{click:async () => {
       if(!dirty){ cls(); return; }
-      Object.keys(pm).forEach(k => { if(!Object.keys(pm[k]||{}).length) delete pm[k]; });
-      Object.keys(m).forEach(k => ppl.add(k)); Object.values(pm).forEach(o => Object.keys(o||{}).forEach(k => ppl.add(k)));
-      const ok = await act(() => S.db.doc('access/roles').set({m, defW, p:pm, pv, ppl:[...ppl].filter(k => !hid.has(k)), nm:Object.fromEntries(Object.entries(nm).filter(([k]) => !hid.has(k))), hid:[...hid].filter(k => !ppl.has(k) || !m[k]), at:nowIso(), by:S.me}), 'บันทึกสิทธิ์แล้ว');
-      if(ok) cls(); else msg.textContent = 'บันทึกไม่ได้ — ต้องเป็นเจ้าของหรือ Editor ของหน้านี้';
+      if(await saveRoles()) cls(); else msg.textContent = 'บันทึกไม่ได้ — ต้องเป็นเจ้าของหรือ Admin';
     }}}, 'บันทึก')]);
-  draw();
+  draw(); loadAccts();
   S.db.collection('seen').get().then(sn => { sn.docs.forEach(d => { seen[d.id] = d.data()||{}; }); draw(); }).catch(() => {});
 }
 
@@ -3682,6 +3745,9 @@ function myIdDlg(){
     R0 ? h('div',{class:'note'}, 'สิทธิ์ตอนนี้: ', h('b',null, R0), S.platW ? '' : ' · ลิงก์นี้แชร์ให้ดูอย่างเดียว') : null),
     cls => [h('button',{class:'btn',on:{click:cls}},'ปิด'), copy]);
 }
+
+/* readable random password (no 0/O, 1/l/I) */
+function genPass(n){ const A = 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKMNPQRSTUVWXYZ23456789', r = new Uint32Array(n||10); crypto.getRandomValues(r); return [...r].map(x => A[x % A.length]).join(''); }
 /* ---------- Backup / import projects (อ่ำ 24 ต.ค.) ----------
    One .zip holds one or more projects, exactly as stored (Data API v1 paths), so the same file works in the claude.ai app and on the web:
      manifest.json                       {kind:'am-testlux-backup', v:1, ver, at, by, from, projects:[{pid, name, code, rooms, photos, files, bytes}]}
