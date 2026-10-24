@@ -187,6 +187,7 @@ details summary{cursor:pointer}
 .fm-more summary{font-size:13px;color:var(--muted);padding:4px 0} .fm-more>div{margin-top:6px}
 .mi{display:flex;flex-direction:column;gap:12px}.mi-code{font-size:15px;font-weight:700;padding:12px 14px;border:1px dashed var(--accent);border-radius:10px;background:var(--subtle);word-break:break-all;user-select:all}.mi textarea{width:100%;resize:none;font-size:12px}.mi .fl{display:flex;flex-direction:column;gap:4px}
 .rl-code{display:flex;flex-direction:column;gap:6px;padding:12px;border:1px solid var(--line);border-radius:10px}.rl-nmr{display:inline-flex;align-items:center;gap:4px;flex-wrap:wrap}.rl-ren{min-height:28px;padding:2px 8px}.rl-nmin{min-height:32px;max-width:260px}
+.bk{display:flex;flex-direction:column;gap:10px}.bk-list{display:flex;flex-direction:column;gap:6px;max-height:50vh;overflow:auto}.bk-row{display:flex;gap:10px;align-items:flex-start;padding:10px;border:1px solid var(--line);border-radius:10px}.bk-row input[type=checkbox]{margin-top:3px;flex:none}.bk-nm{display:flex;flex-direction:column;gap:4px;min-width:0}.bk-im .seg{flex-wrap:wrap}
 .rl-opt input[type=radio]{appearance:auto;width:18px;height:18px;flex:none;margin:2px 0 0;accent-color:var(--accent);background:none}
 .std-grid{display:flex;flex-direction:column;gap:14px}   /* plan full width on top, room table under it (อ่ำ 23 ต.ค.) */
 .res-legend{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:4px 14px;font-size:12px;color:var(--body)} .res-lg{display:flex;gap:6px;align-items:baseline;min-width:0} .res-lg b{flex:none;min-width:22px;padding:0 4px;border-radius:3px;background:var(--ink);color:var(--surface);text-align:center;font-size:11px}
@@ -240,7 +241,7 @@ details summary{cursor:pointer}
 </head><body><div id="app"></div>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
 <script src="config.js"></script>
-<script>window.AM_VER='v25.5';</script><script>
+<script>window.AM_VER='v25.6';</script><script>
 /* ===== AM Test Lux — web platform (Supabase) =====
    The app talks to one small API (Data API v1, see web/API.md):
      db.doc(path).get/set/update/delete/onSnapshot · db.collection(path).get/onSnapshot/doc
@@ -844,7 +845,7 @@ function viewHome(page){
   page.append(h('div',{class:'row',style:'align-items:flex-end'},
     h('div',{style:'display:flex;flex-direction:column;gap:4px;min-width:0'}, h('div',{class:'eyebrow'},'Test & Commissioning · Lighting'), h('h1',null,'ผลวัดความเข้มแสง (Lux) รายโครงการ'),
       h('div',{class:'note'},'วางจุดวัดบนแบบทุก 2 × 2 ม. · กรอกค่าหน้างาน · สรุปผลเทียบมาตรฐานรายห้อง')),
-    h('span',{class:'sp'}), isAdm() ? h('button',{class:'btn primary',id:'new-proj',on:{click:newProjectDlg}}, '+ โครงการใหม่') : null));
+    h('span',{class:'sp'}), isAdm() ? h('div',{class:'row',style:'gap:8px'}, h('button',{class:'btn',id:'bk-open',title:'ดาวน์โหลดไฟล์ Backup ของโครงการที่เลือก',on:{click:() => backupDlg()}}, '💾 Backup'), h('button',{class:'btn',id:'im-open',title:'นำเข้าโครงการจากไฟล์ Backup',on:{click:importDlg}}, '📥 นำเข้า'), h('button',{class:'btn primary',id:'new-proj',on:{click:newProjectDlg}}, '+ โครงการใหม่')) : null));
   if(isAdm()) page.append(storeReminder());
   if(!list.length){ page.append(h('div',{class:'card empty'}, h('h3',null,'ยังไม่มีโครงการ'), h('div',null, isAdm() ? 'กด "+ โครงการใหม่" แล้วอัปโหลดแบบ Layout (รูปหรือ PDF) เพื่อเริ่ม' : 'ยังไม่มีโครงการที่คุณมีสิทธิ์ดู — '+(window.AM_WEB ? 'ติดต่อ Admin ของ AM Electric' : 'ส่งรหัสผู้ใช้ให้ Admin เพื่อขอสิทธิ์')), !isAdm() && S.me && !window.AM_WEB ? h('button',{class:'btn primary',id:'myid-home',on:{click:myIdDlg}},'🪪 รหัสผู้ใช้ของฉัน') : null)); return; }
   page.append(h('div',{class:'grid'}, list.map(P => {
@@ -861,8 +862,8 @@ function viewHome(page){
 function storeReminder(){
   let until = 0; try{ until = +localStorage.getItem('am_lux_rmd')||0; }catch(e){ /* storage unavailable */ }
   if(Date.now() < until) return null;
-  const b = h('div',{class:'banner warn',id:'store-rmd'}, h('b',null,'ก่อนใช้งานจริง: ตั้งที่เก็บข้อมูลใหม่ที่รองรับการ Backup'),
-    h('div',{class:'note'}, 'ตอนนี้ข้อมูลและรูปเก็บในฐานข้อมูลของหน้านี้ (เต็ม 100 MB · โครงการขนาด HSFK พร้อมรูปทุกจุด ≈ 40 MB) และยังไม่มีระบบ Backup — แจ้ง Sera ให้ตั้งค่าก่อนเริ่มโครงการจริง'),
+  const b = h('div',{class:'banner warn',id:'store-rmd'}, window.AM_WEB ? h('b',null,'ช่วงทดลอง: กด 💾 Backup หลังวัดเสร็จแต่ละวัน') : h('b',null,'ที่เก็บข้อมูลของหน้านี้จำกัด 100 MB — กด 💾 Backup เก็บไฟล์ไว้เสมอ'),
+    h('div',{class:'note'}, window.AM_WEB ? 'ข้อมูลเก็บใน Supabase แพ็กเกจฟรี (500 MB) ซึ่งไม่มี Backup อัตโนมัติ — ดาวน์โหลดไฟล์ Backup เก็บไว้ใน OneDrive / Google Drive' : 'โครงการขนาด HSFK พร้อมรูปทุกจุด ≈ 40 MB · ระบบนี้ไม่มี Backup อัตโนมัติ — ดาวน์โหลดไฟล์ Backup เก็บไว้ใน OneDrive / Google Drive · ย้ายไปเว็บ AM ได้ด้วยปุ่ม 📥 นำเข้า'),
     h('div',{class:'row'}, h('button',{class:'btn sm',id:'store-rmd-later',on:{click:() => { try{ localStorage.setItem('am_lux_rmd', String(Date.now()+7*864e5)); }catch(e){ /* storage unavailable */ } b.remove(); }}}, 'เตือนอีกครั้งใน 7 วัน')));
   return b;
 }
@@ -3680,6 +3681,136 @@ function myIdDlg(){
     out, msg,
     R0 ? h('div',{class:'note'}, 'สิทธิ์ตอนนี้: ', h('b',null, R0), S.platW ? '' : ' · ลิงก์นี้แชร์ให้ดูอย่างเดียว') : null),
     cls => [h('button',{class:'btn',on:{click:cls}},'ปิด'), copy]);
+}
+/* ---------- Backup / import projects (อ่ำ 24 ต.ค.) ----------
+   One .zip holds one or more projects, exactly as stored (Data API v1 paths), so the same file works in the claude.ai app and on the web:
+     manifest.json                       {kind:'am-testlux-backup', v:1, ver, at, by, from, projects:[{pid, name, code, rooms, photos, files, bytes}]}
+     p/{pid}/project.json                the project document
+     p/{pid}/{collection}/{id}.json      rooms, layout pieces (img), plan backgrounds (bg_*), photos (ph), cal certificate (cert), logos (logo)
+   Import always writes a new copy unless the Admin chooses to replace the same project (restore). */
+const BK_KIND = 'am-testlux-backup';
+const bkCols = P => ['rooms', 'img', 'ph', 'cert', 'logo'].concat(Object.keys((P && P.bgs) || {}).map(k => 'bg_'+k));
+
+/* read a zip made by rtZip (or any plain zip: stored / deflate) */
+async function rtUnzip(buf){
+  const a = buf instanceof Uint8Array ? buf : new Uint8Array(buf); let e = -1;
+  for(let i = a.length-22; i >= Math.max(0, a.length-22-65535); i--) if(rtU32(a, i)===0x06054b50){ e = i; break; }
+  if(e < 0) throw new Error('ไม่ใช่ไฟล์ .zip หรือไฟล์เสีย');
+  const n = rtU16(a, e+10), out = new Map(), dec = new TextDecoder(); let p = rtU32(a, e+16);
+  for(let k=0; k<n; k++){
+    if(rtU32(a, p)!==0x02014b50) throw new Error('โครงสร้างไฟล์ .zip ผิด');
+    const meth = rtU16(a, p+10), cs = rtU32(a, p+20), nl = rtU16(a, p+28), xl = rtU16(a, p+30), cl2 = rtU16(a, p+32), ho = rtU32(a, p+42);
+    const name = dec.decode(a.subarray(p+46, p+46+nl)); p += 46+nl+xl+cl2;
+    if(name.endsWith('/')) continue;
+    const d0 = ho+30+rtU16(a, ho+26)+rtU16(a, ho+28), raw = a.subarray(d0, d0+cs);
+    out.set(name, meth===0 ? raw : meth===8 ? await rtInflate(raw) : (() => { throw new Error('รูปแบบบีบอัดไม่รองรับ: '+meth); })());
+  }
+  return out;
+}
+const bkMB = b => (b/1048576).toFixed(b < 10485760 ? 1 : 0)+' MB';
+
+/* collect every document of one project; a sample project's borrowed drawings are copied in as its own */
+async function bkCollect(pid, prog){
+  flushAll();
+  const P = cl(P_(pid)||{}); delete P.id; const src = srcOf(pid), files = {}, enc = new TextEncoder(); let bytes = 0, photos = 0, rooms = 0;
+  const put = (path, data) => { const b = enc.encode(JSON.stringify(data)); files['p/'+pid+'/'+path+'.json'] = b; bytes += b.length; };
+  if(P.imgFrom){ P.copiedFrom = P.imgFrom; delete P.imgFrom; }
+  for(const col of bkCols(P)){
+    const from = col==='rooms' || col==='ph' ? pid : src;
+    prog && prog('อ่าน '+(P.name||pid)+' · '+col+'…');
+    const s = await S.db.collection('projects/'+from+'/'+col).get();
+    s.docs.forEach(d => { const x = d.data(); if(x==null) return; put(col+'/'+d.id, x); if(col==='ph') photos++; if(col==='rooms' && !x.deleted) rooms++; });
+  }
+  put('project', P);
+  return {files, meta:{pid, name:P.name||'', code:P.code||'', rooms, photos, files:Object.keys(files).length, bytes}};
+}
+
+function backupDlg(pre){
+  const projs = Object.values(S.projects).filter(P => projRole(P.id)==='admin').sort((a, b) => String(a.name||'').localeCompare(String(b.name||'')));
+  const pick = new Set(pre ? [pre] : []), msg = h('div',{class:'note',id:'bk-msg',role:'status'});
+  const rows = projs.map(P => { const cb = h('input',{type:'checkbox','data-pid':P.id}); cb.checked = pick.has(P.id);
+    cb.addEventListener('change', () => { if(cb.checked) pick.add(P.id); else pick.delete(P.id); go.disabled = !pick.size; });
+    const n = Object.keys(S.rooms[P.id]||{}).length;
+    return h('label',{class:'bk-row'}, cb, h('span',{class:'bk-nm'}, h('b',null, P.name||P.id), h('span',{class:'note'}, [P.code, P.demo ? 'ตัวอย่าง' : '', n ? n+' ห้อง' : '', P.createdAt ? 'สร้าง '+String(P.createdAt).slice(0, 10) : ''].filter(Boolean).join(' · ')))); });
+  const all = h('button',{class:'btn ghost sm',id:'bk-all',on:{click:() => { const on = pick.size < projs.length; rows.forEach(r => { const c = r.querySelector('input'); c.checked = on; if(on) pick.add(c.dataset.pid); else pick.delete(c.dataset.pid); }); go.disabled = !pick.size; }}}, 'เลือก / ไม่เลือก ทั้งหมด');
+  const go = h('button',{class:'btn primary',id:'bk-go',on:{click:async () => {
+    go.disabled = true; const t0 = Date.now();
+    try{
+      const files = {}, metas = [];
+      for(const pid of projs.map(P => P.id).filter(id => pick.has(id))){ const r = await bkCollect(pid, s => { msg.textContent = s; }); Object.assign(files, r.files); metas.push(r.meta); }
+      const man = {kind:BK_KIND, v:1, app:'AM Test Lux', ver:window.AM_VER||'', at:nowIso(), by:S.me, from:window.AM_WEB ? 'web' : 'claude.ai', projects:metas};
+      files['manifest.json'] = new TextEncoder().encode(JSON.stringify(man, null, 1));
+      msg.textContent = 'กำลังบีบอัด '+bkMB(metas.reduce((s, m) => s+m.bytes, 0))+'…';
+      const zip = await rtZip(files), one = metas.length===1 ? (metas[0].code || metas[0].name || metas[0].pid) : metas.length+'projects';
+      const name = 'AMTestLux_Backup_'+String(one).replace(/[^\w\-]+/g, '_').slice(0, 40)+'_'+today()+'.zip';
+      const r = await S.dl.save({filename:name, data:new Blob([zip], {type:'application/zip'})});
+      msg.textContent = (r && r.status==='saved' ? 'บันทึกแล้ว · ' : '')+name+' · '+bkMB(zip.length)+' · '+metas.map(m => (m.name||m.pid)+' ('+m.rooms+' ห้อง, '+m.photos+' รูป)').join(', ')+' · '+Math.round((Date.now()-t0)/1000)+' วินาที';
+    }catch(e){ if(!(e && /declin|cancel|dismiss/i.test(String(e.code||'')))) msg.textContent = 'Backup ไม่สำเร็จ: '+errMsg(e); }
+    go.disabled = !pick.size;
+  }}}, '💾 ดาวน์โหลด Backup');
+  go.disabled = !pick.size;
+  dialog('Backup โครงการ', h('div',{class:'bk'},
+    h('div',{class:'note'}, 'เลือกโครงการ → ได้ไฟล์ .zip 1 ไฟล์ (ข้อมูลห้อง จุดวัด แบบ พื้นหลัง รูปถ่าย ใบ Cal โลโก้ ครบ) · เก็บไฟล์ไว้ที่ปลอดภัย เช่น OneDrive / Google Drive · ใช้ "นำเข้า" ได้ทั้งในแอป claude.ai และเว็บ'),
+    h('div',{class:'row'}, all), h('div',{class:'bk-list',id:'bk-list'}, rows.length ? rows : h('div',{class:'note'},'ยังไม่มีโครงการ')), msg),
+    cls => [h('button',{class:'btn',on:{click:cls}},'ปิด'), go]);
+}
+
+function importDlg(){
+  const file = h('input',{type:'file',id:'im-file',accept:'.zip,application/zip'}), msg = h('div',{class:'note',id:'im-msg',role:'status'}), list = h('div',{class:'bk-list',id:'im-list'});
+  let Z = null, man = null; const choice = {};
+  const draw = () => {
+    list.replaceChildren(...man.projects.map(m => {
+      const c = choice[m.pid] = choice[m.pid] || {on:true, mode:'copy', name:''}, exists = !!S.projects[m.pid];
+      const cb = h('input',{type:'checkbox','data-pid':m.pid}); cb.checked = c.on; cb.addEventListener('change', () => { c.on = cb.checked; upd(); });
+      const modes = h('span',{class:'seg','data-pid':m.pid}, [['copy','สร้างเป็นโครงการใหม่ (สำเนา)']].concat(exists ? [['replace','แทนที่โครงการเดิม (กู้คืน)']] : []).map(([k, l]) =>
+        h('button',{'aria-pressed':String(c.mode===k),'data-mode':k,on:{click:() => { c.mode = k; draw(); }}}, l)));
+      return h('div',{class:'bk-row bk-im'}, cb, h('div',{class:'bk-nm'}, h('b',null, m.name||m.pid), h('span',{class:'note'}, [m.code, m.rooms+' ห้อง', m.photos+' รูป', bkMB(m.bytes)].filter(Boolean).join(' · ')),
+        modes, c.mode==='replace' ? h('div',{class:'banner warn'}, 'ข้อมูลปัจจุบันของ "'+(S.projects[m.pid].name||m.pid)+'" จะถูกแทนที่ด้วยข้อมูลในไฟล์ทั้งหมด (ห้อง ค่าวัด รูป ที่เพิ่มหลังวัน Backup จะหาย)') : null));
+    }));
+    upd();
+  };
+  const upd = () => { go.disabled = !man || !man.projects.some(m => choice[m.pid] && choice[m.pid].on); };
+  file.addEventListener('change', async () => {
+    const f = file.files[0]; man = null; list.replaceChildren(); upd(); if(!f) return;
+    msg.textContent = 'กำลังอ่าน '+f.name+' ('+bkMB(f.size)+')…';
+    try{
+      Z = await rtUnzip(await f.arrayBuffer()); const mb = Z.get('manifest.json');
+      man = mb && JSON.parse(new TextDecoder().decode(mb));
+      if(!man || man.kind!==BK_KIND || !Array.isArray(man.projects)) throw new Error('ไม่ใช่ไฟล์ Backup ของ AM Test Lux');
+      msg.textContent = 'Backup วันที่ '+String(man.at||'').slice(0, 16).replace('T', ' ')+' · จาก '+(man.from||'?')+(man.ver ? ' · '+man.ver : '')+' · '+man.projects.length+' โครงการ';
+      draw();
+    }catch(e){ msg.textContent = 'อ่านไฟล์ไม่ได้: '+errMsg(e); }
+  });
+  const go = h('button',{class:'btn primary',id:'im-go',on:{click:async () => {
+    go.disabled = true; file.disabled = true; const done = [];
+    try{
+      for(const m of man.projects.filter(m => choice[m.pid].on)){
+        const c = choice[m.pid], pid = c.mode==='replace' ? m.pid : uid(), pre = 'p/'+m.pid+'/', dec = new TextDecoder();
+        const docs = [...Z.keys()].filter(k => k.startsWith(pre) && k.endsWith('.json')).map(k => [k.slice(pre.length, -5), k]);
+        const P = JSON.parse(dec.decode(Z.get(pre+'project.json'))); delete P.id; delete P.imgFrom;
+        if(c.mode==='copy'){ const taken = Object.values(S.projects).some(x => x.name===P.name); if(taken) P.name = (P.name||'โครงการ')+' (สำเนา '+today()+')'; P.createdAt = nowIso(); }
+        P.restoredFrom = {at:nowIso(), by:S.me, backupAt:man.at||'', from:man.from||'', pid:m.pid, mode:c.mode};
+        const sub = docs.filter(([p]) => p!=='project'), blobs = sub.filter(([p]) => !p.startsWith('rooms/')), rooms = sub.filter(([p]) => p.startsWith('rooms/'));
+        if(c.mode==='replace'){   /* remove what the backup does not have */
+          const keep = new Set(sub.map(([p]) => p)), cur = S.projects[pid]||{};
+          for(const col of new Set(bkCols(cur).concat(bkCols(P)))){ const s = await S.db.collection('projects/'+pid+'/'+col).get(); for(const d of s.docs) if(!keep.has(col+'/'+d.id)) await S.db.doc('projects/'+pid+'/'+col+'/'+d.id).delete(); }
+        }
+        let n = 0; const tot = sub.length+1;
+        const write = async list => { for(let i=0; i<list.length; i+=6) await Promise.all(list.slice(i, i+6).map(async ([p, k]) => {
+          await S.db.doc('projects/'+pid+'/'+p).set(JSON.parse(dec.decode(Z.get(k)))); n++; msg.textContent = 'นำเข้า '+(P.name||m.pid)+' · '+n+' / '+tot; })); };
+        await write(blobs); await write(rooms);
+        P.at = nowIso(); P.by = S.me; await S.db.doc('projects/'+pid).set(P);
+        if(c.mode==='replace'){ Object.keys(S.img).forEach(k => { if(k.includes(pid)) delete S.img[k]; }); Object.keys(S.ph||{}).forEach(k => { if(k.startsWith(pid+'/')) delete S.ph[k]; }); }
+        done.push([pid, P.name]);
+      }
+      msg.textContent = 'นำเข้าเสร็จ ✓ '+done.map(d => d[1]).join(', '); toast('นำเข้าโครงการแล้ว');
+    }catch(e){ msg.textContent = 'นำเข้าไม่สำเร็จ: '+errMsg(e)+(done.length ? ' (สำเร็จแล้ว: '+done.map(d => d[1]).join(', ')+')' : ''); }
+    file.disabled = false; upd();
+  }}}, '📥 นำเข้า');
+  go.disabled = true;
+  dialog('นำเข้าโครงการจาก Backup', h('div',{class:'bk'},
+    h('div',{class:'note'}, 'เลือกไฟล์ AMTestLux_Backup_….zip → เลือกโครงการ → นำเข้า · ค่าเริ่มต้นสร้างเป็นโครงการใหม่ ไม่ทับของเดิม'), file, msg, list),
+    cls => [h('button',{class:'btn',on:{click:cls}},'ปิด'), go]);
 }
 /* ---------- overlapping rooms: cut the smaller room out of the bigger one ----------
    For every room that overlaps a smaller room: raster the room (2 px per layout px), remove the smaller rooms,
