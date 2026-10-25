@@ -241,7 +241,7 @@ details summary{cursor:pointer}
 </head><body><div id="app"></div>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
 <script src="config.js"></script>
-<script>window.AM_VER='v25.7';</script><script>
+<script>window.AM_VER='v25.8';</script><script>
 /* ===== AM Test Lux — web platform (Supabase) =====
    The app talks to one small API (Data API v1, see web/API.md):
      db.doc(path).get/set/update/delete/onSnapshot · db.collection(path).get/onSnapshot/doc
@@ -2637,17 +2637,27 @@ function roomEditor(pid){
    point: p.ph = photo id, p.phb = bytes, p.pt = time taken, p.ai = {v, c (high|medium|low), s (as shown), n (note), at}  */
 S.ph = {}; S.aiBusy = {}; S.aiErr = {}; S.smp = null; S.smpImg = null;
 const PH_MAX = 190000;
-async function photoCompress(file){
+/* v25.8: the time stamp burned into the stored copy of a meter photo (date + time, dd/mm/yyyy hh:mm:ss, Gregorian) — the copy sent to the AI reader stays clean */
+const phStampText = t => { const d = new Date(t), z = n => String(n).padStart(2, '0'); return z(d.getDate())+'/'+z(d.getMonth()+1)+'/'+d.getFullYear()+' '+z(d.getHours())+':'+z(d.getMinutes())+':'+z(d.getSeconds()); };
+function phStamp(c, w, h, t){
+  const fs = Math.max(14, Math.round(Math.min(w, h)*.042)), txt = phStampText(t); c.save(); c.font = 'bold '+fs+'px system-ui, sans-serif'; c.textBaseline = 'alphabetic';
+  const tw = c.measureText(txt).width, px = Math.round(fs*.5), bw = tw+px*2, bh = Math.round(fs*1.5), x = w-bw-Math.round(fs*.4), y = h-bh-Math.round(fs*.4);
+  c.fillStyle = 'rgba(0,0,0,.62)'; c.fillRect(x, y, bw, bh); c.fillStyle = '#ffd24a'; c.fillText(txt, x+px, y+Math.round(bh*.72)); c.restore();
+}
+/* the time the photo was taken: the file's own time (camera capture / gallery photo) when it is sensible, otherwise now */
+const phTime = f => { const m = f && f.lastModified; return m && m > 946684800000 && m <= Date.now()+60000 ? new Date(m).toISOString() : nowIso(); };
+async function photoCompress(file, stampAt){
   const url = URL.createObjectURL(file), im = new Image(); im.src = url;
   try{ await im.decode(); }catch(e){ URL.revokeObjectURL(url); throw new Error('เปิดรูปนี้ไม่ได้ — ใช้ไฟล์ JPG / PNG'); }
   let dim = 1280, q = .78, cv, d;
   for(let n=0; n<14; n++){
     const k = Math.min(1, dim/Math.max(im.naturalWidth, im.naturalHeight)); cv = document.createElement('canvas'); cv.width = Math.round(im.naturalWidth*k); cv.height = Math.round(im.naturalHeight*k);
-    const c = cv.getContext('2d'); c.fillStyle = '#fff'; c.fillRect(0, 0, cv.width, cv.height); c.drawImage(im, 0, 0, cv.width, cv.height); d = cv.toDataURL('image/jpeg', q);
+    const c = cv.getContext('2d'); c.fillStyle = '#fff'; c.fillRect(0, 0, cv.width, cv.height); c.drawImage(im, 0, 0, cv.width, cv.height); if(stampAt) phStamp(c, cv.width, cv.height, stampAt); d = cv.toDataURL('image/jpeg', q);
     if(d.length <= PH_MAX) break; if(q > .5) q -= .08; else { dim = Math.round(dim*.82); q = .7; }
   }
+  let bc = cv; if(stampAt){ bc = document.createElement('canvas'); bc.width = cv.width; bc.height = cv.height; const c2 = bc.getContext('2d'); c2.fillStyle = '#fff'; c2.fillRect(0, 0, bc.width, bc.height); c2.drawImage(im, 0, 0, bc.width, bc.height); }   /* clean copy for the AI reader */
+  const blob = await new Promise(ok => bc.toBlob(ok, 'image/jpeg', q));
   URL.revokeObjectURL(url);
-  const blob = await new Promise(ok => cv.toBlob(ok, 'image/jpeg', q));
   return {d, w:cv.width, h:cv.height, blob, bytes:Math.round(d.length*.75)};
 }
 const phLoad = (pid, id) => { const k = pid+'/'+id; if(!S.ph[k]) S.ph[k] = S.db.doc('projects/'+pid+'/ph/'+id).get().then(s => s.exists ? s.data().d : null); S.ph[k].catch(() => { delete S.ph[k]; }); return S.ph[k]; };
@@ -2655,11 +2665,11 @@ function phDel(pid, id){ if(!id) return; delete S.ph[pid+'/'+id]; S.db.doc('proj
 /* attach a photo to point i of a room; the old photo of that point is removed */
 async function phAttach(pid, rid, i, file){
   const R = S.rooms[pid][rid], p0 = (R.pts||[])[i]; if(!p0) return null;
-  const X = await photoCompress(file), id = 'f'+uid();
+  const ts = phTime(file), X = await photoCompress(file, ts), id = 'f'+uid();
   await S.db.doc('projects/'+pid+'/ph/'+id).set({d:X.d, w:X.w, h:X.h, at:nowIso(), by:S.me, room:rid});
   S.ph[pid+'/'+id] = Promise.resolve(X.d);
   const L = cl(S.rooms[pid][rid].pts), j = i; const old = L[j].ph;
-  Object.assign(L[j], {ph:id, phb:X.bytes, pt:nowIso()}); delete L[j].ai; putRoom(pid, rid, {pts:L}); flushAll();
+  Object.assign(L[j], {ph:id, phb:X.bytes, pt:ts}); delete L[j].ai; putRoom(pid, rid, {pts:L}); flushAll();
   if(old) phDel(pid, old);
   return {id, blob:X.blob};
 }
