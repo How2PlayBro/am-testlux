@@ -241,7 +241,7 @@ details summary{cursor:pointer}
 </head><body><div id="app"></div>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
 <script src="config.js"></script>
-<script>window.AM_VER='v25.8';</script><script>
+<script>window.AM_VER='v25.9';</script><script>
 /* ===== AM Test Lux — web platform (Supabase) =====
    The app talks to one small API (Data API v1, see web/API.md):
      db.doc(path).get/set/update/delete/onSnapshot · db.collection(path).get/onSnapshot/doc
@@ -742,26 +742,84 @@ const isDxf = f => /\.dxf$/i.test(f.name||'');
 /* rooms found in a DXF → room documents (numbered in reading order; anything not closed exactly as drawn carries the "ตรวจขอบเขต" tag) */
 function dxfAddRooms(pid, rooms){ const q0 = roomsOf(pid).reduce((m, x) => Math.max(m, x.q||0), 0);
   rooms.forEach((r, i) => putRoom(pid, 'r'+uid(), {n:String(r.n).slice(0, 120), f:'', q:q0+i+1, poly:r.poly, std:'', pts:[], autoN:0, rv:r.rv ? 1 : 0, ad:r.ad||null, cad:1})); flushAll(); }
+/* v25.9 "อัปเดตขอบห้องตามชื่อ" — a revised DXF of the same sheet: rooms whose NAME matches (k-th time the name appears, reading order) get the new outline only;
+   points / values / standard / photos stay. New names → new rooms. Rooms that are not in the drawing are never deleted.
+   Old layout and new DXF are both CAD → every old % position is mapped through CAD coordinates into the new picture (frame can change) after a sanity check. */
+const dxKey = s => String(s||'').normalize('NFKC').toUpperCase().replace(/[^\p{L}\p{M}\p{N}]/gu, '');   /* keeps Thai names apart */
+function dxfMatchPlan(pid, nr, cad){
+  const P = P_(pid), old = P.cad, R = roomsOf(pid), nb = cad.box, ob = old && old.box, canGeo = !!(ob && ob.length===4 && old.unit===cad.unit);
+  const toC = (b, p) => [b[0]+p[0]/100*(b[2]-b[0]), b[3]-p[1]/100*(b[3]-b[1])], ctr = (b, poly) => { const bb = RTG.bounds(poly); return toC(b, [(bb.x+bb.right)/2, (bb.y+bb.bottom)/2]); };
+  /* same name → pair by position when both layouts are CAD (a room removed / renamed in the drawing cannot shift the pairing); otherwise k-th occurrence in reading order */
+  const oldBy = {}, newBy = {}; R.forEach(a => { (oldBy[dxKey(a.n)] = oldBy[dxKey(a.n)]||[]).push(a); }); nr.forEach(r => { (newBy[dxKey(r.n)] = newBy[dxKey(r.n)]||[]).push(r); });
+  const pair = new Map();
+  Object.keys(newBy).forEach(k => { const O = oldBy[k]||[], N = newBy[k];
+    if(canGeo && O.length && O.every(a => (a.poly||[]).length>=3)){
+      const c = []; O.forEach(a => N.forEach((r, j) => { const u = ctr(ob, a.poly), v = ctr(nb, r.poly); c.push([Math.hypot(u[0]-v[0], u[1]-v[1]), a, j]); }));
+      const ua = new Set(), uj = new Set(); c.sort((x, y) => x[0]-y[0]).forEach(([d, a, j]) => { if(!ua.has(a.id) && !uj.has(j)){ ua.add(a.id); uj.add(j); pair.set(N[j], a); } }); }
+    else N.forEach((r, j) => { if(O[j]) pair.set(r, O[j]); }); });
+  const upd = [], add = [], used = new Set();
+  nr.forEach(r => { const a = pair.get(r); if(a){ upd.push({a, r}); used.add(a.id); } else add.push(r); });
+  const keep = R.filter(a => !used.has(a.id)), hasPts = a => (a.pts||[]).length>0, withPts = R.filter(hasPts);
+  const out = {upd, add, keep, tf:null, shift:null, why:'', bad:false, moved:false, unit:cad.unit};
+  if(!canGeo) out.why = !old ? 'แบบเดิมไม่ได้มาจากไฟล์ CAD' : 'หน่วยของไฟล์ CAD ไม่ตรงกับแบบเดิม';
+  else {
+    const d = upd.filter(u => (u.a.poly||[]).length>=3).map(u => { const o = ctr(ob, u.a.poly), n = ctr(nb, u.r.poly); return Math.hypot(o[0]-n[0], o[1]-n[1]); }).sort((a, b) => a-b);
+    out.shift = d.length ? d[d.length>>1] : null;
+    const tol = .03*Math.max(nb[2]-nb[0], nb[3]-nb[1]);
+    if(out.shift==null) out.why = 'ไม่มีห้องที่ชื่อตรงกับห้องเดิมเลย จึงตรวจไม่ได้ว่าแบบใหม่วางตำแหน่งเดียวกับแบบเดิม';
+    else if(out.shift>tol) out.why = 'ห้องที่ชื่อตรงกันอยู่คนละตำแหน่งกับแบบเดิมมาก (เลื่อนเฉลี่ย '+(out.shift*cad.unit/1000).toFixed(1)+' ม.) — น่าจะเป็นคนละแผ่น หรือย้ายจุดอ้างอิงในไฟล์';
+    else if(!ob.every((v, i) => Math.abs(v-nb[i]) <= 2)){
+      out.moved = true;
+      out.tf = p => { const c = toC(ob, p); return [r3((c[0]-nb[0])/(nb[2]-nb[0])*100), r3((nb[3]-c[1])/(nb[3]-nb[1])*100)]; };
+    }
+  }
+  const geoOk = !out.why;
+  /* a measured room that would land outside the new frame cannot be mapped safely */
+  const offFrame = out.tf ? withPts.filter(a => !used.has(a.id) && ((a.poly||[]).concat((a.pts||[]).map(q => [q.x, q.y]))).some(q => { const t = out.tf(q); return t[0]<-.5 || t[0]>100.5 || t[1]<-.5 || t[1]>100.5; })) : [];
+  out.off = offFrame.length;
+  if(withPts.length && !geoOk){ out.bad = true; out.why = out.why+' · มี '+withPts.length+' ห้องที่มีจุดวัดแล้ว จึงไม่ปลอดภัยที่จะย้ายจุดตามแบบใหม่ — ใช้ "เก็บห้องเดิม" หรือส่งไฟล์แบบเดิมที่แก้ไข'; }
+  else if(offFrame.length){ out.bad = true; out.why = 'ห้องที่มีจุดวัด '+offFrame.length+' ห้องอยู่นอกกรอบแบบใหม่ — กรอบของ DXF ใหม่เล็กกว่าเดิม (ซ่อนเลเยอร์ที่ทำให้กรอบเปลี่ยน หรือเลือกชุดแบบอื่น)'; }
+  return out;
+}
+const dxfMatchText = pl => 'อัปเดตขอบห้องที่ชื่อตรงกัน '+pl.upd.length+' ห้อง (จุดวัด/ค่าคงเดิม) · เพิ่มห้องใหม่ '+pl.add.length+' ห้อง · ห้องเดิมที่ไม่มีในแบบ '+pl.keep.length+' ห้อง (คงไว้ ไม่ลบ)'
+  +(pl.bad ? ' — ทำไม่ได้: '+pl.why : pl.moved ? ' · กรอบแบบใหม่ต่างจากเดิม ระบบย้ายห้อง/จุดวัดเดิมตามพิกัด CAD ให้ (เลื่อนเฉลี่ย '+(pl.shift*pl.unit/1000).toFixed(2)+' ม.)' : pl.why ? ' · '+pl.why+' (ห้องเดิมที่ไม่มีในแบบอาจเลื่อนตำแหน่ง)' : '');
+/* apply: returns the number of measured points that now sit outside their room's new outline */
+function dxfApplyMatch(pid, pl){
+  const mv = (pts) => pl.tf ? pts.map(q => { const t = pl.tf([q.x, q.y]); return Object.assign({}, q, {x:t[0], y:t[1]}); }) : pts;
+  let outN = 0;
+  pl.upd.forEach(({a, r}) => { const patch = {poly:r.poly, rv:r.rv ? 1 : 0, ad:r.ad||a.ad||null, cad:1};
+    if((a.pts||[]).length){ patch.pts = mv(a.pts); outN += patch.pts.filter(q => !RTG.contains(r.poly, [q.x, q.y])).length; }
+    putRoom(pid, a.id, patch); });
+  if(pl.tf) pl.keep.forEach(a => { const patch = {}; if((a.poly||[]).length) patch.poly = a.poly.map(pl.tf); if((a.pts||[]).length) patch.pts = mv(a.pts); if(Object.keys(patch).length) putRoom(pid, a.id, patch); });
+  if(pl.add.length) dxfAddRooms(pid, pl.add);
+  return outN;
+}
 const LAYOUT_NOTE = 'PDF (หน้าแรก) / JPG / PNG — หรือ DXF จาก AutoCAD: ได้ห้อง ชื่อ พื้นที่ และสเกลจากแบบเลย';
 /* replace the layout drawing (อ่ำ, 23 ต.ค.): keep rooms when it is the same sheet, or clear rooms and start over */
 function replaceLayoutDlg(pid){
   const P = P_(pid), R = roomsOf(pid), used = R.filter(x => (x.pts||[]).some(q => num(q.v)!=null || q.na || q.ph));
   const file = h('input',{type:'file',id:'rl-file',accept:'image/*,application/pdf,.dxf'}), msg = h('div',{class:'note',id:'rl-msg'}, LAYOUT_NOTE);
-  const rb = (v, lab, note, dis) => { const i = h('input',{type:'radio',name:'rl-mode',value:v,id:'rl-'+v}); i.disabled = !!dis; return h('label',{class:'card rl-opt',style:'display:flex;flex-direction:row;gap:8px;align-items:flex-start;padding:10px;cursor:pointer'+(dis ? ';opacity:.55' : '')}, i, h('div',null, h('b',null,lab), h('div',{class:'note'}, note))); };
+  const rb = (v, lab, note, dis) => { const i = h('input',{type:'radio',name:'rl-mode',value:v,id:'rl-'+v}); i.disabled = !!dis; i.addEventListener('change', () => { touched = true; }); return h('label',{class:'card rl-opt',style:'display:flex;flex-direction:row;gap:8px;align-items:flex-start;padding:10px;cursor:pointer'+(dis ? ';opacity:.55' : '')}, i, h('div',null, h('b',null,lab), h('div',{class:'note'}, note))); };
   const optNew = rb('new','ลบห้องทั้งหมด แล้วเริ่มกำหนดห้องใหม่', used.length ? 'ทำไม่ได้: มี '+used.length+' ห้องที่มีค่าวัด / รูปแล้ว — ต้องลบห้องเหล่านั้นเองก่อนในหน้าแก้ห้อง' : 'ใช้เมื่อแบบใหม่ครอปต่างจากเดิม หรือเป็นคนละแผ่น · ล้างห้อง '+R.length+' ห้อง เส้นปิดช่องประตู และสเกล', used.length);
   const optKeep = rb('keep','เก็บห้องและจุดวัดเดิมไว้', 'ใช้เมื่อเป็นแบบแผ่นเดิมที่แก้ไข (ขอบกระดาษเท่าเดิม) — ห้องวางตามสัดส่วนของรูป ถ้าครอปต่างไป ห้องจะเลื่อน · สเกลปรับตามความกว้างรูปใหม่');
+  const optMatch = rb('match','อัปเดตขอบห้องตามชื่อ (ไฟล์ DXF แบบที่แก้ไขแล้ว)', 'ห้องที่ชื่อตรงกันเปลี่ยนเฉพาะเส้นขอบ — จุดวัด / ค่า / มาตรฐาน / รูป ยังอยู่ · ชื่อใหม่ในแบบ = เพิ่มห้อง · ห้องที่ไม่มีในแบบไม่ถูกลบ · ใช้ได้เฉพาะไฟล์ .dxf');
+  let touched = false;
+  /* a DXF over a CAD-based layout with rooms: offer the update-by-name mode unless อ่ำ already picked something */
+  file.addEventListener('change', () => { const f = file.files[0], m = document.getElementById('rl-match'); if(f && isDxf(f) && P.cad && m && !touched){ m.checked = true; msg.textContent = 'ไฟล์ DXF — เลือก "อัปเดตขอบห้องตามชื่อ" ให้แล้ว (เปลี่ยนได้)'; } });
   const pick = (used.length || !R.length) ? 'keep' : 'new'; setTimeout(() => { const el = document.getElementById('rl-'+pick); if(el) el.checked = true; });
   dialog('เปลี่ยนแบบ Layout', h('div',{style:'display:flex;flex-direction:column;gap:10px'},
     h('div',{class:'note'}, 'แบบปัจจุบัน: '+((P.src||{}).title||'Layout')+' · '+((P.src||{}).w||0)+' × '+((P.src||{}).h||0)+' px · ห้อง '+R.length+' ห้อง'),
-    h('label',{class:'fl'}, 'ไฟล์แบบใหม่ *', file, msg), R.length ? h('div',{style:'display:flex;flex-direction:column;gap:6px'}, optNew, optKeep) : null,
+    h('label',{class:'fl'}, 'ไฟล์แบบใหม่ *', file, msg), R.length ? h('div',{style:'display:flex;flex-direction:column;gap:6px'}, optNew, optKeep, optMatch) : null,
     h('div',{class:'banner warn'}, 'แบบเดิมจะถูกแทนที่ ย้อนกลับไม่ได้ (ห้องที่ลบยังกู้คืนได้ — แจ้ง Sera) · แบบพื้นหลังสำหรับลูกค้า (ถ้ามี) ไม่ถูกเปลี่ยน')),
     cls => [h('button',{class:'btn',on:{click:cls}},'ยกเลิก'), h('button',{class:'btn primary',id:'rl-go',on:{click:async e => {
       const fl = file.files[0]; if(!fl){ toast('เลือกไฟล์แบบใหม่ก่อน', true); return; }
       const sel = document.querySelector('input[name=rl-mode]:checked'), mode = R.length ? (sel ? sel.value : '') : 'new';
       if(!mode){ toast('เลือกว่าจะเก็บหรือลบห้องเดิม', true); return; }
+      if(mode==='match' && !isDxf(fl)){ toast('โหมดนี้ใช้ได้เฉพาะไฟล์ .dxf — เลือก "เก็บห้องเดิม" ถ้าเป็นรูป / PDF', true); return; }
       if(mode==='new' && used.length){ toast('มีห้องที่มีค่าวัดแล้ว — เลือก "เก็บห้องเดิม" หรือลบห้องเหล่านั้นเองก่อน', true); return; }
       e.target.disabled = true; msg.textContent = 'กำลังเตรียมแบบ…';
-      let X = null; if(isDxf(fl)){ X = await dxfImportDlg(fl, {noRooms:mode==='keep'}); if(!X){ e.target.disabled = false; msg.textContent = LAYOUT_NOTE; return; } }
+      let X = null, PL = null; if(isDxf(fl)){ X = await dxfImportDlg(fl, mode==='match' ? {plan:(rooms, cad) => { const pl = dxfMatchPlan(pid, rooms, cad); return {txt:dxfMatchText(pl), bad:pl.bad}; }} : {noRooms:mode==='keep'}); if(!X){ e.target.disabled = false; msg.textContent = LAYOUT_NOTE; return; } }
+      if(mode==='match'){ PL = dxfMatchPlan(pid, X.rooms, X.cad); if(PL.bad){ toast(PL.why, true); e.target.disabled = false; msg.textContent = LAYOUT_NOTE; return; } }
       const okk = await act(async () => {
         const old = P.src ? Object.assign({}, P.src) : null, L = X ? X.layout : await fileToLayout(fl);
         await saveLayout(pid, L.d, L.w, L.h, fl.name.replace(/\.[^.]+$/, ''), L.lb);
@@ -770,10 +828,12 @@ function replaceLayoutDlg(pid){
           R.forEach(x => putRoom(pid, x.id, {deleted:true})); putProject(pid, X ? {mmpx:X.mmpx, how:'cad', cad:X.cad, bar:[]} : {mmpx:null, how:null, bar:[]}); flushAll();   /* flush before dropping them locally, or the write has nothing to send */
           R.forEach(x => { delete S.rooms[pid][x.id]; });
           if(X) dxfAddRooms(pid, X.rooms);
+        } else if(mode==='match'){
+          const outN = dxfApplyMatch(pid, PL); putProject(pid, {mmpx:X.mmpx, how:'cad', cad:X.cad, bar:PL.tf ? (P.bar||[]).map(l => l.map(PL.tf)) : (P.bar||[])}); PL.outN = outN;
         } else if(X) putProject(pid, {mmpx:X.mmpx, how:'cad', cad:X.cad});
         else if(P.mmpx>0 && old && old.w) putProject(pid, {mmpx:Math.round(P.mmpx*old.w/L.w*10000)/10000});
         flushAll(); cls(); render();
-        toast(X ? (mode==='new' ? 'ใส่แบบจาก DXF แล้ว — '+X.rooms.length+' ห้อง · สเกลจากไฟล์ · ตรวจห้องที่ติดป้าย "ตรวจขอบเขต"' : 'ใส่แบบจาก DXF แล้ว — ห้องเดิมยังอยู่ ตรวจว่าตรงกับแบบใหม่') : mode==='new' ? 'เปลี่ยนแบบแล้ว — ต่อไป: วาด / ตรวจจับห้อง แล้วตั้งสเกล' : 'เปลี่ยนแบบแล้ว — ตรวจว่าห้องยังตรงกับแบบใหม่');
+        toast(mode==='match' ? 'อัปเดตจากแบบ DXF แล้ว — ขอบห้อง '+PL.upd.length+' ห้อง · ห้องใหม่ '+PL.add.length+' ห้อง · คงไว้ '+PL.keep.length+' ห้อง'+(PL.outN ? ' · จุดวัด '+PL.outN+' จุดอยู่นอกขอบใหม่ — ตรวจ' : '')+(PL.upd.some(u => u.r.rv) || PL.add.some(r => r.rv) ? ' · ตรวจห้องที่ติดป้าย "ตรวจขอบเขต"' : '') : X ? (mode==='new' ? 'ใส่แบบจาก DXF แล้ว — '+X.rooms.length+' ห้อง · สเกลจากไฟล์ · ตรวจห้องที่ติดป้าย "ตรวจขอบเขต"' : 'ใส่แบบจาก DXF แล้ว — ห้องเดิมยังอยู่ ตรวจว่าตรงกับแบบใหม่') : mode==='new' ? 'เปลี่ยนแบบแล้ว — ต่อไป: วาด / ตรวจจับห้อง แล้วตั้งสเกล' : 'เปลี่ยนแบบแล้ว — ตรวจว่าห้องยังตรงกับแบบใหม่');
       });
       if(!okk){ e.target.disabled = false; msg.textContent = S.lastErr || 'ลองอีกครั้ง'; msg.style.color = 'var(--low)'; }
     }}}, 'เปลี่ยนแบบ')]);
@@ -2259,13 +2319,15 @@ function dxfImportDlg(file, opt){
       S0.res = await DXF.rooms(S0.Wk.segs, labs, box, {mmU:S0.mmU, bound, door, wall, contour:RTG.contour, simplify:RTG.simplifyClosed, snap:RTG.snapOrtho}, async (i, n) => { say('กำลังหาห้อง… ('+i+'/'+n+')'); await sleep(0); });
       S0.pick = new Set(S0.res.rooms.map((r, i) => r.poly ? i : -1).filter(i => i>=0));
       S0.ren = dxfRender(S0.Wk, box, S0.C.groups, S0.lab, 3200);
-      paint(); go.disabled = !(opt.noRooms || S0.pick.size);
+      paint();
     }
     function paint(){
       const R = (S0.res||{}).rooms||[], c = {}; R.forEach(r => { c[r.status] = (c[r.status]||0)+1; });
       const found = R.filter(r => r.poly).length;
       say(R.length ? 'พบ '+found+' จาก '+R.length+' ชื่อห้องในแบบ' : status.textContent);
-      sum.replaceChildren(...(R.length ? [h('div',{class:'row'}, ...Object.keys(DX_ST).filter(k => c[k]).map(k => pill(DX_ST[k][0]+' '+c[k], DX_ST[k][1])))] : []));
+      /* opt.plan(rooms, {box, unit}) → {txt, bad}: what the import will do to the rooms already in the project (Test Lux "update by name"); bad = cannot be applied safely */
+      const pl = opt.plan && R.length && S0.boxes.length ? opt.plan(mkRooms(), {box:S0.boxes[S0.bi].box.map(v => Math.round(v)), unit:S0.mmU}) : null; S0.bad = !!(pl && pl.bad);
+      sum.replaceChildren(...(R.length ? [h('div',{class:'row'}, ...Object.keys(DX_ST).filter(k => c[k]).map(k => pill(DX_ST[k][0]+' '+c[k], DX_ST[k][1]))), pl && pl.txt ? h('div',{class:S0.bad ? 'banner warn' : 'note','data-dx':'plan',id:'dx-plan'}, pl.txt) : null].filter(Boolean) : []));
       if(S0.ren){ const {cv, k} = S0.ren, box = S0.boxes[S0.bi].box, view = document.createElement('canvas'), vw = Math.min(cv.width, 1800), s = vw/cv.width; view.width = vw; view.height = Math.round(cv.height*s); view.id = 'dx-prev'; view.style.cssText = 'width:100%;height:auto;display:block';
         const g = view.getContext('2d'); g.drawImage(cv, 0, 0, view.width, view.height);
         const COL = {auto:'30,142,82', fixed:'255,106,0', check:'201,49,31', merged:'176,122,0'};
@@ -2285,6 +2347,8 @@ function dxfImportDlg(file, opt){
             h('td',null, pill(DX_ST[r.status][0], DX_ST[r.status][1]), r.why && r.status==='none' ? h('div',{class:'note'}, r.why) : null)); })))) : h('div'));
       go.textContent = S0.pick.size ? 'ใช้แบบนี้ + สร้าง '+S0.pick.size+' ห้อง' : 'ใช้แบบนี้';
       if(opt.noRooms) go.textContent = 'ใช้แบบนี้ (เก็บห้องเดิม)';
+      if(opt.plan) go.textContent = 'ใช้แบบนี้ + อัปเดตห้อง';
+      go.disabled = !(opt.noRooms || S0.pick.size) || !!S0.bad;
     }
     function buildLayers(){
       const sel = h('select',{id:'dx-lab'}, Object.keys(S0.C.labelScores).concat(Object.keys(S0.C.labelScores).includes(S0.lab) || !S0.lab ? [] : [S0.lab]).map(l => { const o = h('option',{value:l}, l+' ('+S0.C.labelScores[l]+')'); o.selected = l===S0.lab; return o; }));
@@ -2300,18 +2364,25 @@ function dxfImportDlg(file, opt){
       boxRow.replaceChildren(...(S0.boxes.length>1 ? [h('span',{class:'note'},'ในไฟล์มีแบบหลายชุด:'), ...S0.boxes.map((b, i) => h('button',{class:'btn sm'+(i===S0.bi ? ' primary' : ''),'data-box':String(i),on:{click:() => { S0.bi = i; buildBoxes(); run(); }}},
         'ชุดที่ '+(i+1)+' ('+Math.round((b.box[2]-b.box[0])*S0.mmU/1000)+' × '+Math.round((b.box[3]-b.box[1])*S0.mmU/1000)+' ม.)'))] : []));
     }
-    go.addEventListener('click', () => {
-      if(!S0.ren || !S0.boxes.length) return;
-      const box = S0.boxes[S0.bi].box, bw = box[2]-box[0], bh = box[3]-box[1], {cv, k, W, H} = S0.ren, pc = ([x, y]) => [r3((x-box[0])/bw*100), r3((box[3]-y)/bh*100)];
-      const labs = DXF.labels(S0.Wk.texts, new Set([S0.lab]), box), lb = labs.map(L => [L.name, r3((L.x-box[0])/bw*100), r3((box[3]-L.y)/bh*100)]).slice(0, 300);
+    /* the picked rooms as {n, poly(% of the layout), rv, ad, st} in reading order (shared by the preview summary and the final result) */
+    function mkRooms(){
+      if(opt.noRooms || !S0.res || !S0.boxes.length) return [];
+      const box = S0.boxes[S0.bi].box, bw = box[2]-box[0], bh = box[3]-box[1], pc = ([x, y]) => [r3((x-box[0])/bw*100), r3((box[3]-y)/bh*100)];
       /* to % of the layout; drop repeated / collinear corners; first outline that passes the app's polygon check */
       const fit = P => { let q = P.map(pc).map(([x, y]) => [Math.min(100, Math.max(0, x)), Math.min(100, Math.max(0, y))]);
         q = q.filter((v, i) => { const w = q[(i+q.length-1)%q.length]; return Math.hypot(v[0]-w[0], v[1]-w[1]) > .002; });
         q = q.filter((v, i) => { const a = q[(i+q.length-1)%q.length], b = q[(i+1)%q.length]; return Math.abs((v[0]-a[0])*(b[1]-a[1])-(v[1]-a[1])*(b[0]-a[0])) > 1e-6; });
         return q; };
-      let rooms = opt.noRooms ? [] : S0.res.rooms.map((r, i) => { if(!S0.pick.has(i) || !r.poly) return null;
+      let rooms = S0.res.rooms.map((r, i) => { if(!S0.pick.has(i) || !r.poly) return null;
         const poly = [r.poly].concat(r.alts||[]).map(fit).find(q => !RTG.polygonError(q)); return poly ? {n:r.name, poly, rv:r.status==='auto' ? 0 : 1, ad:r.areaTxt||null, st:r.status} : null; }).filter(Boolean);
       if(typeof reReadingOrder==='function') rooms = reReadingOrder(rooms);
+      return rooms;
+    }
+    go.addEventListener('click', () => {
+      if(!S0.ren || !S0.boxes.length) return;
+      const box = S0.boxes[S0.bi].box, bw = box[2]-box[0], bh = box[3]-box[1], {cv, k, W, H} = S0.ren;
+      const labs = DXF.labels(S0.Wk.texts, new Set([S0.lab]), box), lb = labs.map(L => [L.name, r3((L.x-box[0])/bw*100), r3((box[3]-L.y)/bh*100)]).slice(0, 300);
+      const rooms = mkRooms();
       const d = dxfToData(cv); close(); fin({layout:{d, w:W, h:H, lb}, mmpx:Math.round(S0.mmU/k*10000)/10000, cad:{file:file.name, box:box.map(v => Math.round(v)), unit:S0.mmU}, rooms});
     });
     (async () => {
@@ -4247,5 +4318,6 @@ async function boot(){
 }
 /* the web build (own login) runs AM_PRE first: sign-in, then it provides the same window.claude API */
 (window.AM_PRE ? window.AM_PRE() : Promise.resolve()).then(boot, e => { console.error(e); boot(); });
+try{ if(localStorage.getItem('am_test_hooks')==='1') window.__lx = {S, P_, roomsOf, putRoom, putProject, flushAll, RTG, dxKey, dxfMatchPlan}; }catch(e){ /* storage unavailable */ }   /* tests only */
 })();
 </script></body></html>
