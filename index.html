@@ -241,7 +241,7 @@ details summary{cursor:pointer}
 </head><body><div id="app"></div>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
 <script src="config.js"></script>
-<script>window.AM_VER='v25.13';</script><script>
+<script>window.AM_VER='v25.15';</script><script>
 /* ===== AM Test Lux — web platform (Supabase) =====
    The app talks to one small API (Data API v1, see web/API.md):
      db.doc(path).get/set/update/delete/onSnapshot · db.collection(path).get/onSnapshot/doc
@@ -3693,7 +3693,20 @@ function rolesDlg(){
   const AC = window.AM_ADMIN || null, accts = {};
   const loadAccts = async () => { if(!AC) return; try{ (await AC.list()).forEach(u => { accts[u.id] = u; }); draw(); }catch(e){ msg.textContent = 'โหลดรายชื่อบัญชีไม่ได้: '+errMsg(e); } };
   const list = h('div',{class:'rl-list',id:'rl-list'}), msg = h('div',{class:'note',id:'rl-msg',role:'status'});
-  const OPTS = [['','ค่าเริ่มต้น'],['admin','BD Team (Admin ทุกโครงการ)'],['team','Foreman'],['client','Client']];
+  const OPTS = [['','ค่าเริ่มต้น'],['admin','BD Team (Admin ทุกโครงการ)'],['pm','PM (Admin เฉพาะโครงการที่เลือก)'],['team','Foreman'],['client','Client']];
+  /* PM is not a stored value: it is 'admin' inside chosen projects only (p[pid][uid]='admin'); BD Team is 'admin' page-wide (m[uid]) */
+  const pmOf = id => projs.filter(P => ((pm[P.id]||{})[id])==='admin');
+  const pickPmProjects = (id, p) => {
+    if(!projs.length){ msg.textContent = 'ยังไม่มีโครงการให้ตั้ง PM'; draw(); return; }
+    const on = new Set(pmOf(id).map(P => P.id)); if(!on.size && curP) on.add(curP);
+    const boxes = projs.map(P => h('label',{style:'display:flex;gap:8px;align-items:center;padding:4px 0'}, h('input',{type:'checkbox','data-pid':P.id,checked:on.has(P.id)}), (P.code ? P.code+' · ' : '')+(P.name||'')));
+    dialog('PM ของ '+nmOf(id, p||{}), h('div',{id:'pm-pick'}, h('div',{class:'note'},'PM = Admin เฉพาะโครงการที่ติ๊ก (เห็นเฉพาะโครงการเหล่านี้ · จัดการสิทธิ์ไม่ได้) · ติ๊กอย่างน้อย 1 โครงการ'), ...boxes),
+      cls => [h('button',{class:'btn',on:{click:() => { cls(); draw(); }}},'ยกเลิก'), h('button',{class:'btn primary',id:'pm-ok',on:{click:() => {
+        const sel2 = boxes.map(b => b.querySelector('input')).filter(i => i.checked).map(i => i.getAttribute('data-pid'));
+        if(!sel2.length){ return; }
+        delete m[id]; projs.forEach(P => { const o = pm[P.id] = pm[P.id]||{}; if(sel2.includes(P.id)) o[id] = 'admin'; else if(o[id]==='admin') delete o[id]; });
+        ppl.add(id); hid.delete(id); dirty = true; msg.textContent = 'ยังไม่บันทึก'; cls(); draw(); }}}, 'ตกลง')]);
+  };
   const ago = t => { if(!t) return ''; const d = (Date.now()-Date.parse(t))/864e5; return d < 1 ? 'เปิดล่าสุดวันนี้' : 'เปิดล่าสุด '+Math.round(d)+' วันก่อน'; };
   const draw = async () => {
     const ids = [...new Set([S.me, ...Object.keys(m), ...Object.keys(seen), ...Object.keys(accts), ...ppl, ...Object.values(pm).flatMap(o => Object.keys(o||{}))])].filter(id => id && (id===S.me || !hid.has(id)));
@@ -3710,7 +3723,7 @@ function rolesDlg(){
       const nmRow = h('span',{class:'rl-nmr'}, nb, ren);
       const av = h('img',{class:'rl-av',alt:'',src:p.avatarUrl||''}); if(!p.avatarUrl) av.hidden = true;
       const ac = accts[id];
-      const sub = h('span',{class:'note'}, [p.guest ? 'ภายนอกองค์กร' : '', ac ? 'ID: '+ac.login : '', ac && ac.banned ? '⛔ ระงับอยู่' : '', ac ? (ac.last ? ago(ac.last).replace('เปิด', 'เข้า') : 'ยังไม่เคยเข้า') : ago((seen[id]||{}).at)].filter(Boolean).join(' · '));
+      const sub = h('span',{class:'note'}, [p.guest ? 'ภายนอกองค์กร' : '', !m[id] && pmOf(id).length ? 'PM ของ '+pmOf(id).map(P => P.name).join(', ') : '', ac ? 'ID: '+ac.login : '', ac && ac.banned ? '⛔ ระงับอยู่' : '', ac ? (ac.last ? ago(ac.last).replace('เปิด', 'เข้า') : 'ยังไม่เคยเข้า') : ago((seen[id]||{}).at)].filter(Boolean).join(' · '));
       /* account tools: new password / suspend (not for yourself or the owner) */
       const tools = AC && ac && !mine && id!==S.me && !ac.owner ? h('span',{class:'rl-acc'},
         h('button',{class:'btn ghost sm','data-pw':id,title:'ตั้งรหัสผ่านใหม่ให้คนนี้',on:{click:e => {
@@ -3722,7 +3735,7 @@ function rolesDlg(){
           if(!b.dataset.arm){ b.dataset.arm = '1'; b.textContent = 'กดอีกครั้ง'; return; } b.disabled = true;
           try{ await AC.ban(id, !ac.banned); ac.banned = !ac.banned; msg.textContent = (ac.banned ? 'ระงับ ' : 'เปิดใช้ ')+nmOf(id, p)+' แล้ว'; draw(); }catch(er){ msg.textContent = 'ไม่สำเร็จ: '+errMsg(er); b.disabled = false; } }}}, ac.banned ? 'เปิดใช้' : 'ระงับ')) : null;
       const right = mine ? h('span',{class:'pill acc'}, h('i'), 'เจ้าของ · BD Team เสมอ')
-        : (() => { const s2 = sel(OPTS, m[id]||'', v => { if(v) m[id] = v; else delete m[id]; dirty = true; msg.textContent = 'ยังไม่บันทึก'; }, 'สิทธิ์ของ '+nmOf(id, p)); s2.style.cssText = 'width:auto;min-height:36px'; s2.dataset.uid = id; return s2; })();
+        : (() => { const s2 = sel(OPTS, m[id] || (pmOf(id).length ? 'pm' : ''), v => { if(v==='pm'){ pickPmProjects(id, p); return; } projs.forEach(P => { const o = pm[P.id]; if(o && o[id]==='admin' && !m[id]) delete o[id]; }); if(v) m[id] = v; else delete m[id]; dirty = true; msg.textContent = 'ยังไม่บันทึก'; draw(); }, 'สิทธิ์ของ '+nmOf(id, p)); s2.style.cssText = 'width:auto;min-height:36px'; s2.dataset.uid = id; return s2; })();
       const del = mine || id===S.me ? null : h('button',{class:'btn ghost sm rl-del','data-del':id,title:'เอาออกจากรายชื่อ (ลบสิทธิ์หลักและสิทธิ์ทุกโครงการของคนนี้)',on:{click:e => { const b = e.currentTarget; if(!b.dataset.arm){ b.dataset.arm = '1'; b.textContent = 'กดอีกครั้ง'; return; }
         delete m[id]; delete nm[id]; Object.values(pm).forEach(o => { if(o) delete o[id]; }); ppl.delete(id); hid.add(id); dirty = true; msg.textContent = 'ยังไม่บันทึก · คนที่เอาออกยังเปิดลิงก์ได้ถ้ายังแชร์ให้อยู่ — ตัดสิทธิ์จริงที่ปุ่ม Share'; draw(); }}}, 'ลบ');
       return h('div',{class:'rl-row','data-uid':id}, av, h('div',{class:'rl-nm'}, nmRow, sub, tools), right, del);
@@ -3741,14 +3754,16 @@ function rolesDlg(){
   const pSel = projs.length ? sel(projs.map(P => [P.id, (P.code ? P.code+' · ' : '')+(P.name||'')]), curP, v => { curP = v; draw(); }, 'โครงการ') : null; if(pSel){ pSel.id = 'rl-proj'; pSel.style.cssText = 'width:auto;min-height:38px;max-width:100%'; }
   /* add someone from the organization who has not opened the page yet */
   const q = h('input',{type:'search',id:'rl-q',placeholder:'พิมพ์ชื่อหรืออีเมลเพื่อเพิ่มคน',autocomplete:'off'}), hits = h('div',{class:'rl-hits',id:'rl-hits'});
-  const addRole = sel([['team','Foreman'],['client','Client'],['admin','BD Team (Admin ทุกโครงการ)']], 'team', () => {}, 'สิทธิ์ของคนที่เพิ่ม'); addRole.style.cssText = 'width:auto;min-height:40px';
+  const addRole = sel([['team','Foreman'],['client','Client'],['pm','PM (โครงการที่เลือก)'],['admin','BD Team (Admin ทุกโครงการ)']], 'team', () => {}, 'สิทธิ์ของคนที่เพิ่ม'); addRole.style.cssText = 'width:auto;min-height:40px';
   /* the same stored value 'admin' reads BD Team page-wide and PM inside one project */
-  const setAddOpts = () => { const v = addRole.value, proj = typeof addTo!=='undefined' && addTo.value==='proj'; addRole.replaceChildren(...[['team','Foreman'],['client','Client'],['admin',proj ? 'PM (Admin ในโครงการนี้)' : 'BD Team (Admin ทุกโครงการ)']].map(([k, l]) => h('option',{value:k},l))); addRole.value = v; };
+  const setAddOpts = () => { const v = addRole.value, proj = typeof addTo!=='undefined' && addTo.value==='proj'; addRole.replaceChildren(...[['team','Foreman'],['client','Client'],['pm','PM (โครงการที่เลือก)']].concat(proj ? [] : [['admin','BD Team (Admin ทุกโครงการ)']]).map(([k, l]) => h('option',{value:k},l))); addRole.value = [...addRole.options].some(o => o.value===v) ? v : 'team'; };
+  /* where a newly added person's role goes: PM → admin in the selected project; otherwise page-wide or this project only */
+  const putRole = id => { const r = addRole.value; if(r==='pm'){ if(!curP) return false; (pm[curP] = pm[curP]||{})[id] = 'admin'; } else if(addTo.value==='proj' && curP){ (pm[curP] = pm[curP]||{})[id] = r; } else m[id] = r; return true; };
   const find = async () => { if(!S.user || !S.user.search){ hits.replaceChildren(h('div',{class:'note'},'ค้นหาคนไม่ได้ในมุมมองนี้')); return; }
     const r = await S.user.search(q.value.trim());
     hits.replaceChildren(...(r||[]).filter(p => p.id && p.id!==S.me).map(p => { const t = h('span'); t.textContent = p.name+(p.email ? ' · '+p.email : '');
-      return h('button',{class:'btn sm ghost rl-hit','data-uid':p.id,on:{click:() => { if(addTo.value==='proj' && curP){ (pm[curP] = pm[curP]||{})[p.id] = addRole.value; } else m[p.id] = addRole.value; ppl.add(p.id); hid.delete(p.id); dirty = true; msg.textContent = 'ยังไม่บันทึก'; q.value = ''; hits.replaceChildren(); draw(); }}}, '+ ', t); }),
-      ...((r||[]).length ? [] : [(q.value.trim() ? (window.AM_WEB ? h('div',{class:'note rl-miss'}, h('b',null,'ไม่พบผู้ใช้'), ' — สร้างบัญชีที่กล่อง "สร้างบัญชีใหม่" ด้านบน') : h('div',{class:'note rl-miss'}, h('b',null,'ไม่พบในองค์กร'), ' — ช่องนี้ค้นได้เฉพาะคนในองค์กร claude.ai ของคุณ (ค้นด้วยชื่อ) · คนนอกองค์กร เช่น อีเมล Gmail ส่วนตัว: ถ้าแชร์ให้ใช้งานได้ (Contributor ขึ้นไป) ให้เขาเปิดลิงก์ 1 ครั้ง ชื่อจะขึ้นในรายชื่อเอง · ถ้าแชร์ให้ดูอย่างเดียว ใช้ "เพิ่มด้วยรหัส" ด้านล่าง')) : h('div',{class:'note'}, ''))]));
+      return h('button',{class:'btn sm ghost rl-hit','data-uid':p.id,on:{click:() => { if(!putRole(p.id)){ msg.textContent = 'ยังไม่มีโครงการให้ตั้ง PM'; return; } ppl.add(p.id); hid.delete(p.id); dirty = true; msg.textContent = 'ยังไม่บันทึก'; q.value = ''; hits.replaceChildren(); draw(); }}}, '+ ', t); }),
+      ...((r||[]).length ? [] : [(q.value.trim() || !window.AM_WEB ? (window.AM_WEB ? h('div',{class:'note rl-miss'}, h('b',null,'ไม่พบผู้ใช้'), ' — สร้างบัญชีที่กล่อง "สร้างบัญชีใหม่" ด้านบน') : h('div',{class:'note rl-miss'}, h('b',null,'ไม่พบในองค์กร'), ' — ช่องนี้ค้นได้เฉพาะคนในองค์กร claude.ai ของคุณ (ค้นด้วยชื่อ) · คนนอกองค์กร เช่น อีเมล Gmail ส่วนตัว: ถ้าแชร์ให้ใช้งานได้ (Contributor ขึ้นไป) ให้เขาเปิดลิงก์ 1 ครั้ง ชื่อจะขึ้นในรายชื่อเอง · ถ้าแชร์ให้ดูอย่างเดียว ใช้ "เพิ่มด้วยรหัส" ด้านล่าง')) : h('div',{class:'note'}, ''))]));
   };
   const addTo = sel([['all','เป็นสิทธิ์หลัก (ทุกโครงการ)'],['proj','เฉพาะโครงการที่เลือกด้านล่าง']], 'all', () => setAddOpts(), 'เพิ่มเป็นสิทธิ์แบบไหน'); addTo.id = 'rl-addto'; addTo.style.cssText = 'width:auto;min-height:40px';
   /* add by user code (อ่ำ 24 ต.ค.): view-only guests cannot register themselves, so they copy their code (🪪 รหัสของฉัน) and send it */
@@ -3759,7 +3774,7 @@ function rolesDlg(){
     if(!t.id){ cMsg.textContent = 'รหัสไม่ถูกต้อง — ให้เขากด 🪪 รหัสของฉัน แล้วคัดลอกมาทั้งข้อความ'; return; }
     if(t.id===S.me){ cMsg.textContent = 'นี่คือรหัสของคุณเอง'; return; }
     const name = cNm.value.trim().slice(0, 60) || t.name; if(name) nm[t.id] = name;
-    if(addTo.value==='proj' && curP){ (pm[curP] = pm[curP]||{})[t.id] = addRole.value; } else m[t.id] = addRole.value;
+    if(!putRole(t.id)){ cMsg.textContent = 'ยังไม่มีโครงการให้ตั้ง PM'; return; }
     ppl.add(t.id); hid.delete(t.id); dirty = true; msg.textContent = 'ยังไม่บันทึก';
     cMsg.textContent = 'เพิ่ม '+(name||'ผู้ใช้')+' แล้ว'+(addTo.value==='proj' && curP ? ' (เฉพาะโครงการที่เลือก)' : ' (สิทธิ์หลัก)')+' — กดบันทึก'; cIn.value = ''; cNm.value = ''; draw(); }}}, '+ เพิ่มด้วยรหัส');
   /* create an ID / password account (web) */
@@ -3775,10 +3790,10 @@ function rolesDlg(){
     acGo.disabled = true; acMsg.textContent = 'กำลังสร้างบัญชี…';
     try{
       const u = await AC.create({login, password:pass, name});
-      const proj = addTo.value==='proj' && curP; if(proj){ (pm[curP] = pm[curP]||{})[u.id] = addRole.value; } else m[u.id] = addRole.value;
+      const proj = (addTo.value==='proj' || addRole.value==='pm') && curP; putRole(u.id);
       ppl.add(u.id); hid.delete(u.id); accts[u.id] = {id:u.id, login:u.login||login, banned:false, last:null}; dirty = true;
       const saved = await saveRoles();
-      const role = {admin:(proj ? 'PM' : 'BD Team'), team:'Foreman', client:'Client'}[addRole.value]+(proj ? ' เฉพาะ '+((S.projects[curP]||{}).name||'') : ' (ทุกโครงการ)');
+      const role = {admin:'BD Team', pm:'PM', team:'Foreman', client:'Client'}[addRole.value]+(proj ? ' เฉพาะ '+((S.projects[curP]||{}).name||'') : ' (ทุกโครงการ)');
       const txt = 'AM Test Lux\nเว็บ: '+location.origin+location.pathname+'\nID: '+(u.login||login)+'\nรหัสผ่านเริ่มต้น: '+pass+'\nเข้าครั้งแรกระบบจะให้ตั้งรหัสผ่านใหม่';
       const ta = h('textarea',{rows:'5',readonly:'readonly',class:'mono',id:'ac-text'}); ta.value = txt;
       acOut.replaceChildren(h('div',{class:'banner'}, h('b',null,'สร้างบัญชี '+(name||login)+' แล้ว · สิทธิ์ '+role+(saved ? '' : ' (ยังไม่ได้บันทึกสิทธิ์ — กดบันทึก)')), ta,
@@ -3806,7 +3821,8 @@ function rolesDlg(){
     AC ? h('div',{class:'rl-code',id:'ac-box'}, h('b',null,'สร้างบัญชีใหม่ (ID / รหัสผ่าน)'), h('div',{class:'note'},'อ่ำเป็นคนตั้ง ID และรหัสผ่านเริ่มต้น แล้วส่งให้ผู้ใช้ · สิทธิ์ใช้ตามช่อง "สิทธิ์" และ "เพิ่มเป็น" ด้านล่าง · เข้าครั้งแรกผู้ใช้ต้องตั้งรหัสใหม่เอง (อ่ำจะไม่รู้รหัสหลังจากนั้น)'),
       h('div',{class:'row'}, h('div',{style:'flex:1 1 180px;min-width:0'}, acLogin), h('div',{style:'flex:1 1 200px;min-width:0'}, acName)),
       h('div',{class:'row'}, h('div',{style:'flex:1 1 180px;min-width:0'}, acPass), acGen, acGo), acMsg, acOut) : null,
-    h('div',{class:'row'}, h('div',{style:'flex:1 1 220px;min-width:0'}, q), addRole, addTo), hits,
+    h('h3',null, window.AM_WEB ? 'เพิ่มคนที่มีบัญชีอยู่แล้ว' : 'เพิ่มคนจากองค์กร'),
+    h('div',{class:'row'}, h('div',{style:'flex:1 1 220px;min-width:0'}, q), h('button',{class:'btn',id:'rl-find',title:'ค้นหาคน (ว่างไว้ = แสดงทุกคนที่ค้นได้)',on:{click:find}}, 'ค้นหา'), addRole, addTo), hits,
     window.AM_WEB ? null : h('div',{class:'rl-code'}, h('b',null,'คนนอกองค์กร / ลูกค้าที่แชร์ให้ดูอย่างเดียว'), h('div',{class:'note'},'ให้เขาเปิดลิงก์ → กดปุ่ม 🪪 รหัสของฉัน มุมบนขวา → คัดลอกส่งมาทาง LINE → วางที่ช่องนี้ (ใช้สิทธิ์และ "เพิ่มเป็น" จากช่องด้านบน)'),
       h('div',{class:'row'}, h('div',{style:'flex:2 1 220px;min-width:0'}, cIn), h('div',{style:'flex:1 1 140px;min-width:0'}, cNm), cAdd), cMsg),
     h('h3',null,'สิทธิ์แยกตามโครงการ'), h('div',{class:'note'},'ใช้ให้ Client / Foreman เห็นเฉพาะโครงการของตัวเอง หรือตั้ง PM ประจำโครงการ (Admin เฉพาะโครงการนั้น) · BD Team และเจ้าของเห็นทุกโครงการ'),
