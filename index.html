@@ -241,7 +241,7 @@ details summary{cursor:pointer}
 </head><body><div id="app"></div>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
 <script src="config.js"></script>
-<script>window.AM_VER='v25.9';</script><script>
+<script>window.AM_VER='v25.10';</script><script>
 /* ===== AM Test Lux — web platform (Supabase) =====
    The app talks to one small API (Data API v1, see web/API.md):
      db.doc(path).get/set/update/delete/onSnapshot · db.collection(path).get/onSnapshot/doc
@@ -897,23 +897,32 @@ function render(){
 /* ---------- stats ---------- */
 /* standard of a room: its own value, else the project-wide value (projects/{pid}.stdAll) */
 const stdOf = r => num(r && r.std)!=null ? num(r.std) : num((P_(S.route.pid)||{}).stdAll);
+/* v25.10 — standard of ONE point: pts[i].std (lux, typed by the team) overrides the room's; pts[i].sn = the reason it differs. Nothing else about a point changes (photo / AI reading / value untouched). */
+const ptCustom = p => !!p && num(p.std)!=null && num(p.std) > 0;
+const ptStd = (r, p) => ptCustom(p) ? num(p.std) : stdOf(r);
+const r1 = x => Math.round(x*10)/10;
+/* a point that holds anything typed or photographed by the team (value, N/A, photo, own standard / reason) is never replaced or dropped by re-placing points */
+const ptHas = p => !!p && (num(p.v)!=null || !!p.na || !!p.ph || ptCustom(p) || !!String(p.sn||'').trim());
 const ST = {ok:['ถึงมาตรฐาน','ok'], low:['ต่ำกว่ามาตรฐาน','low'], nostd:['ยังไม่ใส่มาตรฐาน','warn'], part:['ยังวัดไม่ครบ',''], nopts:['ยังไม่มีจุดวัด',''], na:['ไม่วัด','']};
 function rStats(r){
   const all = r.pts||[], P = all.filter(p => !p.na), vals = P.map(p => num(p.v)).filter(v => v!=null), std = stdOf(r);
   const avg = vals.length ? vals.reduce((s, v) => s+v, 0)/vals.length : null, mn = vals.length ? Math.min(...vals) : null, mx = vals.length ? Math.max(...vals) : null, done = !!P.length && vals.length===P.length;
-  return {n:all.length, na:all.length-P.length, m:vals.length, avg, mn, mx, u0:avg ? mn/avg : null, std, done, st:r.na ? 'na' : !all.length ? 'nopts' : !done ? 'part' : std==null ? 'nostd' : avg>=std ? 'ok' : 'low'};
+  /* a room with custom point standards is judged against the AVERAGE standard of its points (no custom point → exactly the room standard, as before) */
+  const nc = P.filter(ptCustom).length, std0 = std; let stdE = std;
+  if(nc){ const e = P.map(p => ptStd(r, p)); stdE = e.every(x => x!=null) ? r1(e.reduce((s, x) => s+x, 0)/e.length) : null; }
+  return {n:all.length, na:all.length-P.length, m:vals.length, avg, mn, mx, u0:avg ? mn/avg : null, std:stdE, std0, nc, done, st:r.na ? 'na' : !all.length ? 'nopts' : !done ? 'part' : stdE==null ? 'nostd' : avg>=stdE ? 'ok' : 'low'};
 }
 function pStats(pid){
-  const rooms = roomsOf(pid), o = {rooms, noPts:[], noStd:[], part:[], pts:0, meas:0, open:0, ok:0, low:0, done:0, live:0, au:0, mv:0, man:0, del:0, base:{}};
+  const rooms = roomsOf(pid), o = {rooms, noPts:[], noStd:[], noSn:0, part:[], pts:0, meas:0, open:0, ok:0, low:0, done:0, live:0, au:0, mv:0, man:0, del:0, base:{}};
   let n = 0;
   rooms.forEach((r, i) => {
     o.base[r.id] = n; n += (r.pts||[]).length; if(r.na) return; o.live++;
     const s = rStats(r), tag = (i+1)+'. '+(r.n||'');
-    if(!s.n) o.noPts.push(tag); if(s.std==null) o.noStd.push(tag); if(s.n && !s.done) o.part.push(tag+' ('+(s.n-s.na-s.m)+' จุด)');
+    if(!s.n) o.noPts.push(tag); if(s.std==null) o.noStd.push(tag); o.noSn += (r.pts||[]).filter(p => !p.na && ptCustom(p) && !String(p.sn||'').trim()).length; if(s.n && !s.done) o.part.push(tag+' ('+(s.n-s.na-s.m)+' จุด)');
     o.pts += s.n-s.na; o.meas += s.m; if(s.st==='ok') o.ok++; if(s.st==='low') o.low++; if(s.done) o.done++;
     const au = (r.pts||[]).filter(p => p.au).length; o.au += au; o.mv += (r.pts||[]).filter(p => p.au && p.mv).length; o.man += s.n-au; o.del += Math.max(0, (r.autoN||0)-au);
   });
-  o.todo = [o.noPts.length ? 'จุดวัด '+o.noPts.length+' ห้อง' : '', o.noStd.length ? 'มาตรฐาน '+o.noStd.length+' ห้อง' : '', o.pts-o.meas>0 ? 'ค่าที่วัด '+(o.pts-o.meas)+' จุด' : ''].filter(Boolean);
+  o.todo = [o.noPts.length ? 'จุดวัด '+o.noPts.length+' ห้อง' : '', o.noStd.length ? 'มาตรฐาน '+o.noStd.length+' ห้อง' : '', o.pts-o.meas>0 ? 'ค่าที่วัด '+(o.pts-o.meas)+' จุด' : '', o.noSn ? 'เหตุผลมาตรฐานเฉพาะจุด '+o.noSn+' จุด' : ''].filter(Boolean);
   return o;
 }
 
@@ -995,7 +1004,7 @@ function viewSetup(page, pid, A){
       h('div',{class:'note'},'ห้องที่มีจุดอยู่แล้วไม่ถูกแตะ · เลขจุดวิ่งต่อกันตามลำดับห้อง · ย้าย / ลบ / เพิ่มจุดเองได้ในหน้า "กรอกค่า" (ปุ่ม แก้จุด)')),
       cls => [h('button',{class:'btn',on:{click:cls}},'ยกเลิก'), h('button',{class:'btn primary',id:'auto-go',on:{click:() => { plan.forEach(z => putRoom(pid, z.x.id, {pts:z.p.map(([x, y]) => ({x, y, au:1})), autoN:z.p.length})); flushAll(); cls(); toast('วางจุดแล้ว '+tot+' จุด'); render(); }}}, 'วางจุด')]);
   }}}, 'วางจุดอัตโนมัติ — ห้องที่ยังไม่มีจุด ('+empty.length+')');
-  const redo = A.rooms.filter(x => !x.na && (x.pts||[]).length && !(x.pts||[]).some(p => num(p.v)!=null || p.na || p.ph) && x.poly && x.poly.length>=3);
+  const redo = A.rooms.filter(x => !x.na && (x.pts||[]).length && !(x.pts||[]).some(ptHas) && x.poly && x.poly.length>=3);
   const bRe = h('button',{class:'btn',id:'auto-redo',disabled:!sc.mmpx || !redo.length,on:{click:() => {
     const plan = redo.map(x => ({x, p:autoPts(x.poly, sc, rGuide(P, x))})).filter(z => z.p.length), tot = plan.reduce((s, z) => s+z.p.length, 0), hand = redo.filter(x => (x.pts||[]).some(p => !p.au || p.mv)).length;
     dialog('วางจุดใหม่ตามแนวทางล่าสุด', h('div',{style:'display:flex;flex-direction:column;gap:8px'}, h('div',null,'แทนจุดเดิมใน '+plan.length+' ห้องที่ยังไม่มีค่าวัด → '+tot+' จุด (กริด '+G.cell+' ม. ร่นผนัง '+G.inset+' ม.)'),
@@ -1192,11 +1201,12 @@ function drawPlan(c, f, img, view, rooms, o){
     c.textAlign = 'center'; c.textBaseline = 'middle'; t.forEach((s, i) => { c.font = (i ? '600 ' : '700 ')+o.fs+'px '+FONT; const yy = cyp+(i-(t.length-1)/2)*o.fs*1.18; c.lineWidth = 3.5; c.strokeStyle = 'rgba(255,255,255,.92)'; c.strokeText(s, cxp, yy); c.fillStyle = '#111'; c.fillText(s, cxp, yy); }); });
   /* every point of every room (results): colour = against that room's standard; values / numbers only when there is room to read them */
   let tagBoxes = null;
+  const cmark = (x, y, R) => { c.beginPath(); c.rect(x+R*.42, y+R*.42, R*.72, R*.72); c.fillStyle = '#1F5FD1'; c.fill(); c.lineWidth = 1.2; c.strokeStyle = '#fff'; c.stroke(); };   /* v25.10: small blue square = this point has its own standard */
   if(o.allPts){ const cellPx = o.allPts.cell*k*(img.__u||1), R = Math.max(3, Math.min(11, cellPx*.16)), showV = cellPx >= 30, showN = cellPx >= 70; let n = 0; if(o.tags){ o.tags.R = R+2; o.tags.Rv = R+2+(showV ? Math.max(9, Math.min(13, cellPx*.2))*1.1 : 0); }
     rooms.forEach(r => { const std = stdOf(r);
-      (r.pts||[]).forEach((p, pi) => { n++; if(o.allPts.show && !o.allPts.show(p, r)) return; const x = toX(p.x), y = toY(p.y), col = ptColor(p, std); if(o.allPts.hits) o.allPts.hits.push([x, y, R, r.id, pi]);
+      (r.pts||[]).forEach((p, pi) => { n++; if(o.allPts.show && !o.allPts.show(p, r)) return; const x = toX(p.x), y = toY(p.y), col = ptColor(p, ptStd(r, p)); if(o.allPts.hits) o.allPts.hits.push([x, y, R, r.id, pi]);
         if(o.hiPt && o.hiPt[0]===r.id && o.hiPt[1]===pi){ c.beginPath(); c.arc(x, y, R+4, 0, Math.PI*2); c.lineWidth = 3; c.strokeStyle = '#1F5FD1'; c.stroke(); }
-        c.beginPath(); c.arc(x, y, R, 0, Math.PI*2); c.fillStyle = col; c.fill(); c.lineWidth = col===PC.none ? 1.6 : 1; c.strokeStyle = col===PC.none ? '#d93025' : 'rgba(0,0,0,.35)'; c.stroke();
+        c.beginPath(); c.arc(x, y, R, 0, Math.PI*2); c.fillStyle = col; c.fill(); c.lineWidth = col===PC.none ? 1.6 : 1; c.strokeStyle = col===PC.none ? '#d93025' : 'rgba(0,0,0,.35)'; c.stroke(); if(ptCustom(p)) cmark(x, y, R);
         c.textAlign = 'center'; c.textBaseline = 'middle';
         if(showN){ c.font = '600 '+Math.round(R*.95)+'px '+FONT; c.fillStyle = col===PC.none ? '#000' : '#fff'; c.fillText(String(n), x, y+.5); }
         const t = p.na ? 'N/A' : num(p.v)!=null ? String(p.v) : '';
@@ -1206,8 +1216,8 @@ function drawPlan(c, f, img, view, rooms, o){
     c.font = '700 '+o.roomNo+'px '+FONT; c.textAlign = 'left'; c.textBaseline = 'top'; const w = c.measureText(t).width+6, x = Math.min(...xs)+3, y = Math.min(...ys)+3;
     c.fillStyle = 'rgba(20,23,26,.78)'; c.fillRect(x, y, w, o.roomNo+4); c.fillStyle = '#fff'; c.fillText(t, x+3, y+2); });
   if(o.target){ const R = o.R||14, std = stdOf(o.target);
-    (o.target.pts||[]).forEach((p, i) => { const x = toX(p.x), y = toY(p.y), col = ptColor(p, std), on = i===o.sel;
-      c.beginPath(); c.arc(x, y, on ? R+3 : R, 0, Math.PI*2); c.fillStyle = col; c.fill(); c.lineWidth = on ? 4 : 2; c.strokeStyle = on ? PC.sel : (col===PC.none ? '#d93025' : 'rgba(0,0,0,.35)'); c.stroke();
+    (o.target.pts||[]).forEach((p, i) => { const x = toX(p.x), y = toY(p.y), col = ptColor(p, ptStd(o.target, p)), on = i===o.sel;
+      c.beginPath(); c.arc(x, y, on ? R+3 : R, 0, Math.PI*2); c.fillStyle = col; c.fill(); c.lineWidth = on ? 4 : 2; c.strokeStyle = on ? PC.sel : (col===PC.none ? '#d93025' : 'rgba(0,0,0,.35)'); c.stroke(); if(ptCustom(p)) cmark(x, y, R);
       if(p.ph){ c.beginPath(); c.arc(x+R*.78, y-R*.78, R*.42, 0, Math.PI*2); c.fillStyle = '#14171A'; c.fill(); c.lineWidth = 1.5; c.strokeStyle = '#fff'; c.stroke(); }
       const n = String((o.base||0)+i+1); c.font = 'bold '+Math.round(R*(n.length>2 ? .8 : 1))+'px '+FONT; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillStyle = col===PC.none ? '#000' : '#fff'; c.fillText(n, x, y+.5);
       if(o.vals && num(p.v)!=null){ c.font = '600 12px '+FONT; c.lineWidth = 3; c.strokeStyle = '#fff'; c.strokeText(String(p.v), x, y+R+10); c.fillStyle = '#111'; c.fillText(String(p.v), x, y+R+10); } }); }
@@ -1248,6 +1258,11 @@ function viewMeasure(page, pid, A){
   const vIn = h('input',{type:'text',id:'val',class:'big',inputmode:'decimal',enterkeyhint:'next',autocomplete:'off','aria-label':'ค่า Lux'});
   const dIn = h('input',{type:'text',id:'day',inputmode:'decimal',autocomplete:'off','aria-label':'ค่า DAY',style:'width:110px'});
   const rIn = h('input',{type:'text',id:'rem',autocomplete:'off',placeholder:'หมายเหตุ (ถ้ามี)','aria-label':'หมายเหตุ',style:'flex:1;min-width:150px;width:auto'});
+  /* v25.10: standard for THIS point only (e.g. a walkway inside an office room) + why. Blank = the room's standard. No switch: typing a value turns it on, clearing it turns it off. */
+  const sIn = h('input',{type:'text',id:'pstd',inputmode:'decimal',autocomplete:'off','aria-label':'มาตรฐานเฉพาะจุด (lux)',style:'width:96px',placeholder:'STD จุดนี้'});
+  const snIn = h('input',{type:'text',id:'pstd-n',autocomplete:'off',placeholder:'เหตุผล เช่น ทางเดิน ไม่ใช่โต๊ะ','aria-label':'เหตุผลมาตรฐานเฉพาะจุด',style:'flex:1;min-width:150px;width:auto'});
+  const sHint = h('div',{class:'note',id:'pstd-hint',style:'flex-basis:100%'});
+  const stdRow = () => h('div',{class:'row',id:'pstd-row',title:'มาตรฐานเฉพาะจุด (lux) — เว้นว่าง = ใช้ของห้อง',style:'gap:6px 8px;flex-wrap:wrap'}, sIn, snIn, sHint);
   const ptLbl = h('b',{style:'font-size:18px;color:var(--ink)'}), bNext = h('button',{class:'btn primary',id:'next',style:'min-height:52px'}, 'บันทึก → จุดถัดไป'), bNaPt = h('button',{class:'btn',id:'pt-na'}, 'วัดไม่ได้');
   /* โหมดหน้างาน (field mode): everything for one point in a panel fixed at the bottom of the screen, reachable with one thumb.
      Options (remembered in this browser): after a photo go to the next point · when a room is done go to the next room · keep the screen on. */
@@ -1256,7 +1271,7 @@ function viewMeasure(page, pid, A){
   const prog = h('span',{class:'note mono',id:'fm-prog'}), bPrev = h('button',{class:'btn fm-nav',id:'fm-prev','aria-label':'จุดก่อนหน้า'}, '‹'), bFwd = h('button',{class:'btn fm-nav',id:'fm-fwd','aria-label':'ข้ามไปจุดถัดไป'}, '›');
   const bShot = h('button',{class:'btn fm-shot',id:'fm-shot','aria-label':'ถ่ายรูปหน้าจอเครื่องวัด'}, '📷');
   const ck = (k, label) => { const b = h('input',{type:'checkbox',id:'fm-'+k}); b.checked = !!FM[k]; b.addEventListener('change', () => fmSet(k, b.checked)); return h('label',{class:'fm-ck'}, b, label); };
-  const more = h('details',{class:'fm-more',id:'fm-more'}, h('summary',null,'รูป · DAY · หมายเหตุ · ตั้งค่า'), h('div',{class:'row'}, h('span',{class:'note'},'DAY'), dIn, rIn), PR.el,
+  const more = h('details',{class:'fm-more',id:'fm-more'}, h('summary',null,'รูป · DAY · หมายเหตุ · มาตรฐานเฉพาะจุด · ตั้งค่า'), h('div',{class:'row'}, h('span',{class:'note'},'DAY'), dIn, rIn), stdRow(), PR.el,
     h('div',{class:'row',style:'gap:4px 14px'}, ck('shotNext','ถ่ายรูปแล้วไปจุดถัดไปเอง'), ck('roomNext','ห้องครบแล้วไปห้องถัดไปเอง'), ck('awake','จอไม่ดับ')));
   /* the panel can be folded to a slim bar (tap the handle / swipe down) and brought back fast (tap the bar / swipe up / tap a point on the map) */
   const grab = h('div',{class:'fm-grab',id:'fm-grab',role:'button',tabindex:'0','aria-label':'พับ / เปิดแผงกรอกค่า',title:'แตะหรือปัดลงเพื่อพับเก็บ'}, h('i'));
@@ -1266,7 +1281,7 @@ function viewMeasure(page, pid, A){
       h('div',{class:'row fm-top'}, ptLbl, prog, h('span',{class:'sp'}), bPrev, bFwd),
       h('div',{class:'row fm-val'}, vIn, h('span',{class:'note'},'lux'), bShot),
       h('div',{class:'row fm-act'}, bNaPt, bNext), more, mini)
-    : h('div',{class:'entry',id:'entry'}, h('div',{class:'row'}, ptLbl, vIn, h('span',{class:'note'},'lux'), bNext, bNaPt), h('div',{class:'row'}, h('span',{class:'note'},'DAY (ถ้าวัด)'), dIn, rIn), PR.el);
+    : h('div',{class:'entry',id:'entry'}, h('div',{class:'row'}, ptLbl, vIn, h('span',{class:'note'},'lux'), bNext, bNaPt), h('div',{class:'row'}, h('span',{class:'note'},'DAY (ถ้าวัด)'), dIn, rIn), stdRow(), PR.el);
   const setMin = on => { if(!fm) return; S.fmMin = !!on; entry.classList.toggle('min', S.fmMin); main.classList.toggle('fm-pad-min', S.fmMin); grab.title = S.fmMin ? '' : 'แตะหรือปัดลงเพื่อพับเก็บ';
     if(S.fmMin){ if(document.activeElement && entry.contains(document.activeElement)) document.activeElement.blur(); more.open = false; } };
   if(fm){ let sw = null;
@@ -1292,6 +1307,12 @@ function viewMeasure(page, pid, A){
   const setPt = (i, patch) => { const L = cl(pts()); if(!L[i]) return; Object.assign(L[i], patch); putRoom(pid, r0.id, {pts:L}); };
   vIn.addEventListener('input', () => { setPt(S.sel, {v:vIn.value.trim()}); draw(); paintSum(); });
   dIn.addEventListener('input', () => setPt(S.sel, {day:dIn.value.trim()})); rIn.addEventListener('input', () => setPt(S.sel, {rem:rIn.value.trim()}));
+  /* point standard: only std / sn are written (setPt merges into the point, so photo / AI reading / value stay as they are) */
+  const paintStd = () => { const p = pts()[S.sel]; if(!p){ sHint.textContent = ''; sHint.hidden = true; return; } const raw = sIn.value.trim(), bad = raw!=='' && !ptCustom({std:raw}), rs = stdOf(get());
+    sHint.className = 'note'+(bad || (ptCustom({std:raw}) && !snIn.value.trim()) ? ' lcwarn' : ''); sHint.style.color = bad || (ptCustom({std:raw}) && !snIn.value.trim()) ? 'var(--low)' : '';
+    sHint.textContent = bad ? 'ใส่เป็นตัวเลข lux มากกว่า 0 (หรือเว้นว่างเพื่อใช้ของห้อง)' : ptCustom({std:raw}) ? (snIn.value.trim() ? 'จุดนี้ใช้มาตรฐาน '+raw+' lx แทนของห้อง'+(rs!=null ? ' ('+rs+')' : '')+' · ห้องนี้เทียบกับมาตรฐานเฉลี่ยของทุกจุด' : 'ใส่เหตุผลด้วย — ต้องบอกว่าทำไมมาตรฐานจุดนี้ต่างจากห้อง') : 'เว้นว่าง = ใช้มาตรฐานของห้อง'+(rs!=null ? ' ('+rs+' lx)' : '');  sHint.hidden = raw==='';};
+  sIn.addEventListener('input', () => { setPt(S.sel, {std:sIn.value.trim()}); paintStd(); draw(); paintSum(); });
+  snIn.addEventListener('input', () => { setPt(S.sel, {sn:snIn.value.trim()}); paintStd(); });
   /* next point still to do (a point with a photo counts as done: the AI fills its value); room done → next room with work left */
   const todo = p => !p.na && num(p.v)==null && !p.ph;
   const goNext = () => { const L = pts(); let j = -1; for(let k=1; k<=L.length; k++){ const q = (S.sel+k)%L.length; if(todo(L[q])){ j = q; break; } }
@@ -1306,7 +1327,7 @@ function viewMeasure(page, pid, A){
   const bLook = nLook ? h('button',{class:'btn',id:'ai-review',title:'เปิดทีละรูป ซูมให้ตัวเลขใหญ่ แล้วให้ AI อ่านใหม่',on:{click:() => phZoom(pid, aiReviewList(pid), 0)}}, '🔍 ตรวจรูปที่ AI ไม่แน่ใจ ('+nLook+')') : null;
   const bEdit = h('button',{class:'btn'+(S.edit ? ' primary' : ''),id:'edit',on:{click:() => { S.edit = !S.edit; render(); }}}, S.edit ? 'เสร็จการแก้จุด' : 'แก้จุด (เพิ่ม / ย้าย / ลบ)');
   const bAuto = h('button',{class:'btn',id:'auto-room',disabled:!sc.mmpx}, 'วางจุดอัตโนมัติห้องนี้');
-  bAuto.addEventListener('click', () => { const L = pts(); if(L.some(p => num(p.v)!=null || p.na || p.ph)){ toast('ห้องนี้มีค่าที่วัดหรือรูปแล้ว — ย้าย / ลบเองทีละจุด', true); return; }
+  bAuto.addEventListener('click', () => { const L = pts(); if(L.some(ptHas)){ toast('ห้องนี้มีค่าที่วัดหรือรูปแล้ว — ย้าย / ลบเองทีละจุด', true); return; }
     if(L.length && !bAuto.dataset.arm){ bAuto.dataset.arm = '1'; bAuto.textContent = 'กดอีกครั้ง: แทนจุดเดิม '+L.length+' จุด'; return; }
     const N = autoPts(r0.poly, sc, rGuide(P, get())); if(!N.length){ toast('ห้องนี้ไม่มีขอบเขตบนแบบ', true); return; } putRoom(pid, r0.id, {pts:N.map(([x, y]) => ({x, y, au:1})), autoN:N.length}); S.sel = 0; render(); });
   /* this room's own grid (shown while editing points): spacing + wall offset, live preview, then re-place */
@@ -1318,7 +1339,7 @@ function viewMeasure(page, pid, A){
     gOut.textContent = 'ตามค่านี้ได้ '+gPrev.length+' จุด (ตอนนี้ '+pts().length+' จุด) · กริด '+g.cell+' ม. ร่นผนัง '+g.inset+' ม.'; bGo.disabled = !gPrev.length; draw(gPrev); };
   const gSave = () => { const o = gNow(); putRoom(pid, r0.id, {g:o.cell==null && o.inset==null ? null : o}); };
   [gCell, gIns].forEach(i => { i.addEventListener('input', gPreview); i.addEventListener('change', gSave); });
-  const bGo = h('button',{class:'btn primary sm',id:'rg-apply',on:{click:() => { const L = pts(); if(L.some(p => num(p.v)!=null || p.na || p.ph)){ toast('ห้องนี้มีค่าที่วัดหรือรูปแล้ว — ย้าย / ลบเองทีละจุด', true); return; }
+  const bGo = h('button',{class:'btn primary sm',id:'rg-apply',on:{click:() => { const L = pts(); if(L.some(ptHas)){ toast('ห้องนี้มีค่าที่วัดหรือรูปแล้ว — ย้าย / ลบเองทีละจุด', true); return; }
     gSave(); if(!gPrev) gPreview(); if(!gPrev || !gPrev.length) return; putRoom(pid, r0.id, {pts:gPrev, autoN:gPrev.length}); flushAll(); S.sel = 0; toast('วางจุดใหม่ '+gPrev.length+' จุด ตามค่าของห้องนี้'); render(); }}}, 'วางจุดใหม่ตามค่านี้');
   const bGClr = h('button',{class:'btn ghost sm',id:'rg-clear',on:{click:() => { gCell.value = ''; gIns.value = ''; gSave(); gPreview(); }}}, 'ใช้ค่าทั้งโครงการ');
   const gRow = h('div',{class:'row',id:'rg-row',style:'gap:8px;flex-wrap:wrap;padding:8px 10px;border:1px dashed var(--line-strong);border-radius:10px'},
@@ -1326,7 +1347,7 @@ function viewMeasure(page, pid, A){
     h('div',{class:'note',style:'flex-basis:100%'}, 'เว้นว่าง = ใช้ค่าทั้งโครงการ (กริด '+guide(P).cell+' ม. · ร่น '+guide(P).inset+' ม.) · พิมพ์แล้วจุดตัวอย่างขึ้นบนแบบทันที · ค่านี้ใช้กับ "วางจุดใหม่" ทั้งโครงการด้วย'));
   gOut.textContent = 'ใช้อยู่: ห่างกัน '+RG.cell+' ม. · ร่นผนัง '+RG.inset+' ม.'+(RG.own ? ' (ค่าของห้องนี้)' : ' (ค่าทั้งโครงการ)');
   const bDel = h('button',{class:'btn ghost',id:'del'}, 'ลบจุดที่เลือก');
-  bDel.addEventListener('click', () => { const L = cl(pts()), p = L[S.sel]; if(!p) return; if((num(p.v)!=null || p.rem || p.ph) && !bDel.dataset.arm){ bDel.dataset.arm = '1'; bDel.textContent = 'กดอีกครั้ง (จุดนี้มีค่า / รูปแล้ว)'; return; } if(p.ph) phDel(pid, p.ph); L.splice(S.sel, 1); putRoom(pid, r0.id, {pts:L}); S.sel = Math.min(S.sel, L.length-1); render(); });
+  bDel.addEventListener('click', () => { const L = cl(pts()), p = L[S.sel]; if(!p) return; if((num(p.v)!=null || p.rem || p.ph || ptCustom(p) || p.sn) && !bDel.dataset.arm){ bDel.dataset.arm = '1'; bDel.textContent = 'กดอีกครั้ง (จุดนี้มีค่า / รูปแล้ว)'; return; } if(p.ph) phDel(pid, p.ph); L.splice(S.sel, 1); putRoom(pid, r0.id, {pts:L}); S.sel = Math.min(S.sel, L.length-1); render(); });
   const info = h('div',{class:'note'});
   function draw(cur){ if(!img) return; const c = cv.getContext('2d'); c.setTransform(2, 0, 0, 2, 0, 0); const tgt = Object.assign({}, get(), cur ? {pts:cur} : {}); map = drawPlan(c, {x:0, y:0, w:W, h:H}, img, view(), rooms.map(x => x.id===r0.id ? tgt : x), {target:tgt, base, sel:S.sel, R:14, vals:true}); }
   function paintSum(){ const s = rStats(get()), t = ST[s.st]; sumBox.replaceChildren(...[pill(t[0], t[1]), pill('วัดแล้ว '+s.m+'/'+(s.n-s.na)), s.avg!=null ? pill('เฉลี่ย '+Math.round(s.avg)+' lx') : null, s.mn!=null ? pill('ต่ำสุด '+s.mn+' · U0 '+(s.u0!=null ? s.u0.toFixed(2) : '–')) : null, s.std!=null ? pill('มาตรฐาน '+s.std+(num(get().std)==null ? ' (ทั้งโครงการ)' : '')) : null].filter(Boolean)); }
@@ -1334,7 +1355,7 @@ function viewMeasure(page, pid, A){
     const L = pts(), p = L[S.sel]; entry.hidden = S.edit || !L.length || !!get().na;
     { const s2 = rStats(get()); prog.textContent = 'ห้อง '+(ri+1)+'/'+rooms.length+' · วัดแล้ว '+s2.m+'/'+(s2.n-s2.na); }
     if(p){ miniPt.textContent = 'จุดที่ '+(base+S.sel+1); miniV.textContent = p.na ? 'วัดไม่ได้' : num(p.v)!=null ? p.v+' lx' : p.ph ? 'มีรูป · รอค่า' : 'ยังไม่วัด'; }
-    if(p){ ptLbl.textContent = 'จุดที่ '+(base+S.sel+1); if(vIn!==document.activeElement) vIn.value = p.v||''; dIn.value = p.day||''; rIn.value = p.rem||''; bNaPt.textContent = p.na ? 'ยกเลิก "วัดไม่ได้"' : 'วัดไม่ได้'; }
+    if(p){ ptLbl.textContent = 'จุดที่ '+(base+S.sel+1); if(vIn!==document.activeElement) vIn.value = p.v||''; dIn.value = p.day||''; rIn.value = p.rem||''; if(sIn!==document.activeElement) sIn.value = p.std||''; if(snIn!==document.activeElement) snIn.value = p.sn||''; paintStd(); if(ptCustom(p)) ptLbl.textContent += ' · มาตรฐาน '+p.std+' lx'; bNaPt.textContent = p.na ? 'ยกเลิก "วัดไม่ได้"' : 'วัดไม่ได้'; }
     info.textContent = (am ? 'พื้นที่ ≈ '+am.toFixed(1)+' ตร.ม. · ' : '')+L.length+' จุด'+(L.length ? ' (เลข '+(base+1)+'–'+(base+L.length)+')' : '')+(S.edit ? ' · คลิกที่ว่าง = เพิ่มจุด · ลากจุด = ย้าย · คลิกจุด = เลือก' : ' · แตะจุดเพื่อเลือก พิมพ์ค่า แล้วกด Enter ไปจุดถัดไป');
     PR.paint(); bDel.hidden = !S.edit; bAuto.hidden = !S.edit; delete bDel.dataset.arm; bDel.textContent = 'ลบจุดที่เลือก'; paintSum(); draw();
   }
@@ -3183,8 +3204,8 @@ function repRows(pid, rep){
     let first = true;
     (r.pts||[]).forEach((q, j) => { const v = num(q.v);
       if(!rep.opt.unmeasured && v==null && !q.na) return;
-      const rem = [first && rep.opt.remAvg && s.avg!=null ? 'AVG '+Math.round(s.avg)+' lx' : '', q.na ? 'วัดไม่ได้: '+(q.rem||'') : (q.rem||'')].filter(Boolean).join(' · ');
-      rows.push({ri:i, rid:r.id, no:String(i+1), loc:r.n||'', pt:String(base+j+1), day:q.day||'', night:q.na ? 'N/A' : (q.v||''), avg:s.avg==null ? '' : String(Math.round(s.avg)), std:s.std==null ? '' : String(s.std), pf:q.na ? '' : repPF(rep, v, s.std, s.avg), rem});
+      const cu = ptCustom(q), rem = [first && rep.opt.remAvg && s.avg!=null ? 'AVG '+Math.round(s.avg)+' lx' : '', q.na ? 'วัดไม่ได้: '+(q.rem||'') : (q.rem||''), cu ? 'STD '+q.std+' lx เฉพาะจุด'+(String(q.sn||'').trim() ? ': '+String(q.sn).trim() : '') : ''].filter(Boolean).join(' · ');
+      rows.push({ri:i, rid:r.id, no:String(i+1), loc:r.n||'', pt:String(base+j+1), day:q.day||'', night:q.na ? 'N/A' : (q.v||''), avg:s.avg==null ? '' : String(Math.round(s.avg)), std:cu ? String(q.std) : s.std==null ? '' : String(s.std), pf:q.na ? '' : repPF(rep, v, rep.opt.pf==='avg' ? s.std : ptStd(r, q), s.avg), rem});
       first = false; });
   });
   return rows;
@@ -3334,7 +3355,7 @@ async function repPlanRooms(c, pg, rep, logos, pid){
 async function repPhotos(c, pg, rep, logos, pid){
   const y0 = repHeader(c, rep, logos, pg.w, rep.title+' – BACKUP : PHOTOS'), m = RTP.m, n = rep.opt.per, nc = n===6 ? 2 : 3, nr = Math.ceil(n/nc), gap = 10;
   const gw = (pg.w-m*2-gap*(nc-1))/nc, gh = (pg.h-y0-m-30-gap*(nr-1))/nr;
-  for(let k=0; k<pg.items.length; k++){ const it = pg.items[k], x = m+(k%nc)*(gw+gap), y = y0+6+Math.floor(k/nc)*(gh+gap), v = num(it.q.v), std = stdOf(it.r);
+  for(let k=0; k<pg.items.length; k++){ const it = pg.items[k], x = m+(k%nc)*(gw+gap), y = y0+6+Math.floor(k/nc)*(gh+gap), v = num(it.q.v), std = ptStd(it.r, it.q);
     rtRect(c, x, y, gw, gh); const d = await phLoad(pid, it.q.ph).catch(() => null);
     if(d){ const im = await loadImg(d).catch(() => null); if(im){ c.save(); c.beginPath(); c.rect(x+4, y+4, gw-8, gh-46); c.clip(); rtContain(c, im, x+4, y+4, gw-8, gh-46); c.restore(); } }
     const cap = 'POINT '+it.no+' · '+(it.q.na ? 'N/A' : v!=null ? it.q.v+' lx' : '–'); c.font = rtFont(12, true); c.textAlign = 'left'; c.textBaseline = 'middle';
@@ -3532,10 +3553,10 @@ async function repXlsx(pid, onP){
         for(let rr=r0; rr<r0+rowsPer; rr++) h3[rr] = 20; if(col===1 && (blk+1)%3===0) brk.push(r0+rowsPer-1); }
       sheets.push({name:'Backup - Photos', cells:c3.length ? c3 : [['A1', '', 0]], widths:[54, 2, 54], heights:h3, images:im3, rowBreaks:brk}); } }
   /* raw data for the team */
-  if(rep.opt.xData){ const c4 = []; ['Point No.','Room No.','Room','Night / least daylight (lux)','Day (lux)','Standard (lux)','Not measured','Remark','AI read (lux)','AI confidence','Photo','X (% of layout)','Y (% of layout)'].forEach((t, j) => c4.push([L(j+1)+'1', t, 1]));
+  if(rep.opt.xData){ const c4 = []; ['Point No.','Room No.','Room','Night / least daylight (lux)','Day (lux)','Standard (lux)','Not measured','Remark','AI read (lux)','AI confidence','Photo','X (% of layout)','Y (% of layout)','Point standard (lux)','Point standard reason'].forEach((t, j) => c4.push([L(j+1)+'1', t, 1]));
     let n = 1; roomsOf(pid).forEach((rm, ix) => { const base = pStats(pid).base[rm.id]||0; (rm.pts||[]).forEach((q, j) => { n++;
-      [[base+j+1, 1], [ix+1, 1], [rm.n||''], [q.v||'', 1], [q.day||'', 1], [stdOf(rm)==null ? '' : stdOf(rm), 1], [q.na ? 'yes' : ''], [q.rem||''], [q.ai && q.ai.v!=null ? q.ai.v : '', 1], [q.ai ? q.ai.c : ''], [q.ph ? 'yes' : ''], [q.x, 1], [q.y, 1]].forEach(([v, isN], k) => c4.push([L(k+1)+n, v, 2, !!isN && v!==''])); }); });
-    sheets.push({name:'Data', cells:c4, widths:[10, 9, 28, 16, 10, 12, 12, 30, 12, 12, 8, 12, 12], heights:{1:30}, titles:[1, 1]}); }
+      [[base+j+1, 1], [ix+1, 1], [rm.n||''], [q.v||'', 1], [q.day||'', 1], [ptStd(rm, q)==null ? '' : ptStd(rm, q), 1], [q.na ? 'yes' : ''], [q.rem||''], [q.ai && q.ai.v!=null ? q.ai.v : '', 1], [q.ai ? q.ai.c : ''], [q.ph ? 'yes' : ''], [q.x, 1], [q.y, 1], [ptCustom(q) ? q.std : '', 1], [String(q.sn||'').trim()]].forEach(([v, isN], k) => c4.push([L(k+1)+n, v, 2, !!isN && v!==''])); }); });
+    sheets.push({name:'Data', cells:c4, widths:[10, 9, 28, 16, 10, 12, 12, 30, 12, 12, 8, 12, 12, 14, 36], heights:{1:30}, titles:[1, 1]}); }
   onP && onP('กำลังรวมไฟล์ Excel…');
   const bytes = await xBook(sheets); onP && onP('');
   const res = await S.dl.save({filename:repName(P, rep, 'xlsx'), data:new Blob([bytes], {type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'})}); if(res && res.status==='saved') toast('บันทึก Excel แล้ว');
@@ -4008,7 +4029,7 @@ function cutPoly(big, smalls, sc){
   if(simp.length < 3) return null;
   return {poly:simp.map(([px, py]) => [r3((bx+(px+.5)/k)/sc.W*100), r3((by+(py+.5)/k)/sc.H*100)]), holes};
 }
-const hasRead = p => num(p.v)!=null || p.na || p.ph;
+const hasRead = p => ptHas(p);
 function cutPlan(pid, ov){
   const P = P_(pid), sc = scOf(P), G = guide(P), R = roomsOf(pid), byId = Object.fromEntries(R.map(r => [r.id, r])), A = id => pxArea(byId[id].poly, sc);
   const cuts = {}; ov.forEach(o => { const [bigId, smId] = A(o.ia) >= A(o.ib) ? [o.ia, o.ib] : [o.ib, o.ia]; (cuts[bigId] = cuts[bigId] || []).push(smId); });
@@ -4079,8 +4100,8 @@ function viewResults(page, pid, A){
   const PROB = pm ? ['low','none'] : ['low','nostd','part'], F = R0.f[R0.mode] || null, on = k => !F || F.includes(k);
   const rCat = x => { const st = rStats(x).st; return st==='ok' || st==='low' || st==='nostd' ? st : 'part'; };
   const pCat = (p, std) => p.na ? 'na' : num(p.v)==null ? 'none' : std!=null && num(p.v)<std ? 'low' : 'ok';
-  const visR = x => !F || (pm ? (x.pts||[]).some(p => on(pCat(p, stdOf(x)))) : on(rCat(x)));
-  const cnt = {}; rooms.forEach(x => { if(pm) (x.pts||[]).forEach(p => { const k = pCat(p, stdOf(x)); cnt[k] = (cnt[k]||0)+1; }); else if(x.poly && x.poly.length>=3){ const k = rCat(x); cnt[k] = (cnt[k]||0)+1; } });
+  const visR = x => !F || (pm ? (x.pts||[]).some(p => on(pCat(p, ptStd(x, p)))) : on(rCat(x)));
+  const cnt = {}; rooms.forEach(x => { if(pm) (x.pts||[]).forEach(p => { const k = pCat(p, ptStd(x, p)); cnt[k] = (cnt[k]||0)+1; }); else if(x.poly && x.poly.length>=3){ const k = rCat(x); cnt[k] = (cnt[k]||0)+1; } });
   const setF = arr => { const a = arr && FK.every(([k]) => arr.includes(k)) ? null : arr && arr.length ? arr : null; R0.f[R0.mode] = a; render(); };
   const all = rooms.filter(x => x.poly && x.poly.length>=3), ar = rooms.find(x => x.id===R0.area);
   const xs = all.flatMap(x => x.poly.map(q => q[0])), ys = all.flatMap(x => x.poly.map(q => q[1]));
@@ -4102,14 +4123,14 @@ function viewResults(page, pid, A){
   const mv = {}; let img = null, map = null, drag = null, hits = [];
   const subC = x => { const st2 = rStats(x).st; return st2==='ok' ? '#1E8E52' : st2==='low' ? '#C9311F' : '#14171A'; };
   const tags = () => { const t = pm ? {fs:fsT(), avoid:true, lines:x => [x.n||''], move:mv} : {fs:fsT(), lines:x => { const s2 = rStats(x); return [x.n||'', s2.avg!=null ? Math.round(s2.avg)+' lx' : '']; }, subColor:subC, move:mv};
-    if(F){ t.show = visR; if(pm) t.ptShow = (p, r) => on(pCat(p, stdOf(r))); } return t; };
+    if(F){ t.show = visR; if(pm) t.ptShow = (p, r) => on(pCat(p, ptStd(r, p))); } return t; };
   const asp0 = sc.W && sc.H ? ((v.y1-v.y0)*sc.H)/((v.x1-v.x0)*sc.W) : 640/1080, asp = () => clamp(asp0, (box.clientWidth||1080) < 600 ? .75 : .42, 1.15);   /* phones get a taller box to pan in */   /* canvas follows the plan's shape: no empty bands */
   const fit = () => { const w = Math.round(box.clientWidth || cv.clientWidth || 1080); if(!w || (Math.abs(w-W) < 2 && cv.__W)) return false; W = w; H = Math.round(Math.min(w*asp(), Math.max(300, (window.innerHeight||900)*.72))); cv.style.aspectRatio = W+'/'+H;   /* never taller than the screen */
     const dpr = Math.min(3, Math.max(2, window.devicePixelRatio||1)); cv.width = Math.round(W*dpr); cv.height = Math.round(H*dpr); cv.__W = W; cv.__H = H; cv.__dpr = dpr; return true; };
   const drawRes = fast => { if(!img) return; fit(); const c = cv.getContext('2d'); c.setTransform(cv.__dpr||2, 0, 0, cv.__dpr||2, 0, 0); const t0 = performance.now(), vw = view();
     hits = []; const cellPx = sc.mmpx ? G.cell*1000/sc.mmpx : 60;
     const o = {fill:x => !visR(x) ? OFF : (pm ? FILLP : FILL)[rStats(x).st], stroke:bare ? '#3B4148' : null, tags:fast ? null : tags(), hi:R0.sel};
-    if(pm){ o.allPts = {cell:cellPx, hits}; if(F) o.allPts.show = (p, r) => on(pCat(p, stdOf(r))); o.hiPt = R0.selPt; }
+    if(pm){ o.allPts = {cell:cellPx, hits}; if(F) o.allPts.show = (p, r) => on(pCat(p, ptStd(r, p))); o.hiPt = R0.selPt; }
     map = drawPlan(c, {x:0, y:0, w:W, h:H}, img, vw, rooms, o); map.vw = vw;
     if(fast) return;
     cv.dataset.ms = Math.round(performance.now()-t0); cv.dataset.tags = map && map.tags ? map.tags.length : 0; cv.dataset.z = zs.s.toFixed(2); cv.__tags = map && map.tags; cv.__hits = hits;
@@ -4182,7 +4203,7 @@ function viewResults(page, pid, A){
     seg('res-fq', [['all','ทั้งหมด'],['prob','เฉพาะที่มีปัญหา']], !F ? 'all' : PROB.length===F.length && PROB.every(k => F.includes(k)) ? 'prob' : '', k => setF(k==='all' ? null : PROB.slice())),
     h('span',{class:'legend'}, FK.map(([k, l, c]) => h('button',{class:'lgb','aria-pressed':String(on(k)),'data-k':k,title:(on(k) ? 'ซ่อน' : 'แสดง')+' '+l,on:{click:() => { const cur = F ? F.slice() : FK.map(q => q[0]); const i = cur.indexOf(k); if(i>=0) cur.splice(i, 1); else cur.push(k); setF(cur); }}},
       h('i',{style:'background:'+(pm ? c : c.replace(/,[.\d]+\)$/, ',.7)'))+';'+(pm ? 'border-radius:50%;border:1.5px solid '+(c===PC.none ? '#d93025' : 'rgba(0,0,0,.3)') : '')}), l, h('b',{class:'mono'}, String(cnt[k]||0))))));
-  const shown = F ? (pm ? rooms.reduce((s2, x) => s2+(x.pts||[]).filter(p => on(pCat(p, stdOf(x)))).length, 0)+' จุด' : rooms.filter(x => x.poly && x.poly.length>=3 && visR(x)).length+' ห้อง') : '';
+  const shown = F ? (pm ? rooms.reduce((s2, x) => s2+(x.pts||[]).filter(p => on(pCat(p, ptStd(x, p)))).length, 0)+' จุด' : rooms.filter(x => x.poly && x.poly.length>=3 && visR(x)).length+' ห้อง') : '';
   const cellPx0 = sc.mmpx ? G.cell*1000/sc.mmpx : 60, tight = pm && !ar && cellPx0*Math.min(1080/((v.x1-v.x0)/100*sc.W||1), 640/((v.y1-v.y0)/100*sc.H||1)) < 30;
   const dragNote = S.canW && R0.drag ? 'ลากป้ายชื่อห้องไปวางตรงที่ไม่บังจุด — บันทึกให้ทันที ใช้กับทุกมุมมองและลูกค้าเห็นตามนี้ · ' : '';
   const zNote = dragOn ? '' : R0.zm==='zoom' ? 'ลากเพื่อเลื่อน · ถ่างสองนิ้ว / หมุนล้อเมาส์เพื่อซูม · ' : 'แบบล็อกอยู่ — ปัดนิ้วบนแบบได้โดยแบบไม่ขยับ · ซูมด้วยปุ่ม + − · ';
@@ -4196,9 +4217,9 @@ function viewResults(page, pid, A){
   const tb = h('table',{class:'t',id:'res-tbl'}, h('thead',null, h('tr',null, ['ลำดับ','ห้อง','พื้นที่ (ตร.ม.)','จุด','เฉลี่ย','ต่ำสุด','สูงสุด','U0','มาตรฐาน','ผล'].map((x, i) => h('th',{style:i>1 && i<9 ? 'text-align:right' : null}, x)))),
     h('tbody',null, rooms.map((x, i) => { if(!visR(x)) return null; const s = rStats(x), t = ST[s.st];
       return h('tr',{style:'cursor:pointer','data-room':x.id,title:'กดดูข้อมูลห้อง',on:{click:() => roomInfo(pid, x.id, null, A)}}, h('td',{class:'n'}, String(i+1)), h('td',null, x.n||''), h('td',{class:'n'}, f1(areaM2(x.poly, sc))), h('td',{class:'n'}, s.m+'/'+(s.n-s.na)+(s.na ? ' (+'+s.na+')' : '')),
-        h('td',{class:'n'}, f0(s.avg)), h('td',{class:'n'}, f0(s.mn)), h('td',{class:'n'}, f0(s.mx)), h('td',{class:'n'}, s.u0!=null ? s.u0.toFixed(2) : '–'), h('td',{class:'n'}, s.std==null ? '–' : String(s.std)), h('td',null, pill(t[0], t[1]))); })));
+        h('td',{class:'n'}, f0(s.avg)), h('td',{class:'n'}, f0(s.mn)), h('td',{class:'n'}, f0(s.mx)), h('td',{class:'n'}, s.u0!=null ? s.u0.toFixed(2) : '–'), h('td',{class:'n',title:s.nc ? 'มีจุดกำหนดมาตรฐานเอง '+s.nc+' จุด — เทียบกับมาตรฐานเฉลี่ยของทุกจุด' : ''}, s.std==null ? '–' : String(s.std)+(s.nc ? ' ✱' : '')), h('td',null, pill(t[0], t[1]))); })));
   page.append(h('section',{class:'card'}, h('div',{class:'row'}, h('h2',null,'สรุปรายห้อง'), F ? h('span',{class:'pill acc',id:'res-tbl-f'}, h('i'), 'ตามตัวกรอง '+rooms.filter(visR).length+' / '+rooms.length+' ห้อง') : null, h('span',{class:'sp'}), S.dl ? h('button',{class:'btn',id:'res-pdf',on:{click:e => { const b = e.currentTarget; b.disabled = true; act(() => repPdf(pid, t => { b.textContent = t || 'ดาวน์โหลดรายงาน PDF'; })).then(() => { b.disabled = false; b.textContent = 'ดาวน์โหลดรายงาน PDF'; }); }}}, 'ดาวน์โหลดรายงาน PDF') : null, S.dl ? h('button',{class:'btn',id:'ph-zip',on:{click:() => act(() => exportPhotos(pid))}}, 'ดาวน์โหลดรูปทั้งหมด (.zip)') : null, S.dl ? h('button',{class:'btn primary',id:'xlsx',on:{click:() => act(() => exportXlsx(pid))}}, 'ดาวน์โหลด Excel') : null),
-    h('div',{class:'tbl-wrap'}, tb), h('div',{class:'note'},'(+n) = จุดที่วัดไม่ได้ พร้อมเหตุผลในหมายเหตุ · U0 = ค่าต่ำสุด ÷ ค่าเฉลี่ย')));
+    h('div',{class:'tbl-wrap'}, tb), h('div',{class:'note'},'(+n) = จุดที่วัดไม่ได้ พร้อมเหตุผลในหมายเหตุ · U0 = ค่าต่ำสุด ÷ ค่าเฉลี่ย'+(rooms.some(x => rStats(x).nc) ? ' · ✱ = ห้องที่มีบางจุดกำหนดมาตรฐานเอง (พร้อมเหตุผล) — ห้องนั้นเทียบกับมาตรฐานเฉลี่ยของทุกจุด' : ''))));
 }
 /* ---------- tap the plan: a sheet for a room, a sheet for one point ---------- */
 const TONE = st => st==='ok' ? 'ok' : st==='low' ? 'low' : st==='nostd' ? 'warn' : '';
@@ -4222,14 +4243,14 @@ function roomInfo(pid, rid, ptIdx, A){
   const hero = h('div',{class:'ri-hero '+tone},
     h('div',{class:'ri-big'}, h('div',{class:'ri-num'}, h('span',{class:'mono'}, f0(s.avg)), s.avg!=null ? h('small',null,'lx') : null), h('div',{class:'note'}, 'ค่าเฉลี่ย '+s.m+' จุด')),
     h('div',{class:'ri-vs'},
-      h('div',{class:'row',style:'justify-content:space-between'}, pill(t[0], tone), h('span',{class:'note mono'}, 'มาตรฐาน '+(s.std==null ? '–' : s.std+' lx')+(s.std!=null && num(r.std)==null ? ' · ทั้งโครงการ' : ''))),
+      h('div',{class:'row',style:'justify-content:space-between'}, pill(t[0], tone), h('span',{class:'note mono'}, 'มาตรฐาน '+(s.std==null ? '–' : s.std+' lx')+(s.nc ? ' · เฉลี่ย (มี '+s.nc+' จุดกำหนดเอง)' : s.std!=null && num(r.std)==null ? ' · ทั้งโครงการ' : ''))),
       pct!=null ? h('div',{class:'ri-bar','aria-label':'ค่าเฉลี่ยเทียบมาตรฐาน '+Math.round(pct*100)+'%'}, h('i',{style:'width:'+Math.min(100, pct/1.5*100)+'%'}), h('b',{style:'left:'+(100/1.5)+'%'})) : null,
       h('div',{class:'note'}, pct!=null ? (pct >= 1 ? 'สูงกว่ามาตรฐาน '+Math.round(s.avg-s.std)+' lx (+'+Math.round((pct-1)*100)+'%)' : 'ต่ำกว่ามาตรฐาน '+Math.round(s.std-s.avg)+' lx (−'+Math.round((1-pct)*100)+'%)') : s.std==null ? 'ยังไม่ได้ใส่ค่ามาตรฐาน' : 'ยังไม่มีค่าที่วัด')));
   const stat = (l, v) => h('div',{class:'ri-stat'}, h('span',null, l), h('b',{class:'mono'}, v));
   const stats = h('div',{class:'ri-stats'}, stat('ต่ำสุด', f0(s.mn)+' lx'), stat('สูงสุด', f0(s.mx)+' lx'), stat('U0', s.u0!=null ? s.u0.toFixed(2) : '–'), stat('จุดวัด', s.m+' / '+(s.n-s.na)+(s.na ? ' (+'+s.na+' N/A)' : '')), stat('พื้นที่', ar!=null ? ar.toFixed(1)+' ม²' : '–'), stat('สูงจากพื้น', guide(P).height+' ม.'));
   /* every point as a chip */
-  const chips = h('div',{class:'ri-chips'}, L.map((q, j) => { const v = num(q.v), st = q.na ? 'na' : v==null ? 'none' : s.std!=null && v < s.std ? 'low' : 'ok';
-    return h('button',{class:'ri-chip '+st,'data-pt':j,'aria-label':'จุดที่ '+(base+j+1),on:{click:go2(() => pointInfo(pid, rid, j, A))}}, h('span',{class:'n'}, String(base+j+1)), h('b',{class:'mono'}, q.na ? 'N/A' : v!=null ? String(q.v) : '–'), q.ph ? h('i',{class:'cam','aria-label':'มีรูป'}, '📷') : null); }));
+  const chips = h('div',{class:'ri-chips'}, L.map((q, j) => { const v = num(q.v), st = q.na ? 'na' : v==null ? 'none' : ptStd(r, q)!=null && v < ptStd(r, q) ? 'low' : 'ok';
+    return h('button',{class:'ri-chip '+st,'data-pt':j,'aria-label':'จุดที่ '+(base+j+1),on:{click:go2(() => pointInfo(pid, rid, j, A))}}, h('span',{class:'n'}, String(base+j+1)), h('b',{class:'mono'}, q.na ? 'N/A' : v!=null ? String(q.v) : '–'), ptCustom(q) ? h('i',{class:'cam','aria-label':'มาตรฐานเฉพาะจุด '+q.std+' lx',title:'มาตรฐานเฉพาะจุด '+q.std+' lx'}, '✱') : null, q.ph ? h('i',{class:'cam','aria-label':'มีรูป'}, '📷') : null); }));
   const body = h('div',{class:'ri'}, hero, stats,
     r.na ? h('div',{class:'banner'},'ห้องนี้ตั้งเป็น "ไม่วัด" — ไม่นับในผลลัพธ์') : null,
     L.length ? miniMap(pid, r, base, null, j => { close(); pointInfo(pid, rid, j, A); }) : null,
@@ -4243,20 +4264,21 @@ function roomInfo(pid, rid, ptIdx, A){
 }
 function pointInfo(pid, rid, j, A){
   const P = P_(pid), rooms = roomsOf(pid), i = rooms.findIndex(x => x.id===rid), r = rooms[i]; if(!r) return; const L = r.pts||[], q = L[j]; if(!q) return;
-  const base = (A && A.base ? A.base[rid] : pStats(pid).base[rid])||0, std = stdOf(r), v = num(q.v), st = q.na ? 'na' : v==null ? 'none' : std!=null && v < std ? 'low' : 'ok';
+  const base = (A && A.base ? A.base[rid] : pStats(pid).base[rid])||0, std = ptStd(r, q), v = num(q.v), st = q.na ? 'na' : v==null ? 'none' : std!=null && v < std ? 'low' : 'ok';
   const tone = st==='ok' ? 'ok' : st==='low' ? 'low' : '', lab = {ok:'ถึงมาตรฐาน', low:'ต่ำกว่ามาตรฐาน', none:'ยังไม่วัด', na:'วัดไม่ได้'}[st];
   let close = null; const go2 = fn => () => { if(close) close(); fn(); };
   const pct = v!=null && std ? v/std : null, avg = rStats(r).avg;
   const hero = h('div',{class:'ri-hero '+tone},
     h('div',{class:'ri-big'}, h('div',{class:'ri-num'}, h('span',{class:'mono'}, q.na ? 'N/A' : v!=null ? String(q.v) : '–'), v!=null ? h('small',null,'lx') : null), h('div',{class:'note'}, 'จุดที่ '+(base+j+1)+' · '+(r.n||''))),
     h('div',{class:'ri-vs'},
-      h('div',{class:'row',style:'justify-content:space-between'}, pill(lab, tone), h('span',{class:'note mono'}, 'มาตรฐาน '+(std==null ? '–' : std+' lx'))),
+      h('div',{class:'row',style:'justify-content:space-between'}, pill(lab, tone), h('span',{class:'note mono'}, 'มาตรฐาน '+(std==null ? '–' : std+' lx')+(ptCustom(q) ? ' · เฉพาะจุด' : ''))),
       pct!=null ? h('div',{class:'ri-bar'}, h('i',{style:'width:'+Math.min(100, pct/1.5*100)+'%'}), h('b',{style:'left:'+(100/1.5)+'%'})) : null,
       h('div',{class:'note'}, pct!=null ? (pct >= 1 ? 'สูงกว่ามาตรฐาน '+Math.round(v-std)+' lx (+'+Math.round((pct-1)*100)+'%)' : 'ต่ำกว่ามาตรฐาน '+Math.round(std-v)+' lx (−'+Math.round((1-pct)*100)+'%)')+(avg!=null ? ' · เฉลี่ยห้อง '+Math.round(avg)+' lx' : '') : q.na ? 'เหตุผล: '+(q.rem||'–') : 'ยังไม่มีค่าที่วัด')));
   const row = (k, val) => val ? h('div',{class:'ri-kv'}, h('span',null, k), h('div',null, val)) : null, a = q.ai;
   const facts = h('div',{class:'ri-kvs'},
     row('ค่า DAY (มีแสงธรรมชาติ)', q.day ? h('b',{class:'mono'}, q.day+' lx') : null),
     row('หมายเหตุ', q.rem||null),
+    row('มาตรฐานเฉพาะจุด', ptCustom(q) ? h('span',null, h('b',{class:'mono'}, q.std+' lx'), ' แทนของห้อง'+(stdOf(r)!=null ? ' ('+stdOf(r)+' lx)' : '')+' · เหตุผล: ', String(q.sn||'').trim() ? String(q.sn).trim() : h('b',{style:'color:var(--low)'}, 'ยังไม่ระบุ')) : null),
     row('AI อ่านจากรูป', a ? (a.v==null ? 'อ่านไม่ได้'+(a.n ? ' · '+a.n : '') : a.v+' lx · '+(AI_CONF[a.c]||'')+(num(q.v)!=null && num(q.v)!==a.v ? ' · ทีมแก้เป็น '+q.v : '')+(a.n ? ' · '+a.n : '')) : null),
     row('ตำแหน่ง', q.au ? (q.mv ? 'ระบบวาง แล้วย้ายหน้างาน' : 'ระบบวางตามกริด') : 'ทีมปักเอง'),
     row('เวลาถ่ายรูป', q.pt ? new Date(q.pt).toLocaleString('th-TH', {dateStyle:'medium', timeStyle:'short'}) : null));
@@ -4282,9 +4304,9 @@ async function exportXlsx(pid){
   put(c1, 5, ['No.','Room','Area (m²)','Points','Measured','Not measured','Average (lux)','Min (lux)','Max (lux)','U0','Standard (lux)','Result (preliminary)'], 1);
   rooms.forEach((x, i) => { const s = rStats(x), ar = areaM2(x.poly, sc);
     put(c1, 6+i, [i+1, x.n||'', ar==null ? '' : (Math.round(ar*10)/10).toFixed(1), s.n, s.m, s.na, s.avg==null ? '' : Math.round(s.avg), s.mn==null ? '' : s.mn, s.mx==null ? '' : s.mx, s.u0==null ? '' : s.u0.toFixed(2), s.std==null ? '' : s.std, ST[s.st][0]], 2); });
-  const c2 = []; put(c2, 1, ['Point No.','Room No.','Room','Lux (least daylight)','Lux (day)','Not measured','Remark','Photo file','AI read (lux)','AI confidence','X (% of layout)','Y (% of layout)'], 1);
-  let n = 0, row = 2; rooms.forEach((x, i) => (x.pts||[]).forEach(q => { n++; put(c2, row++, [n, i+1, x.n||'', q.v||'', q.day||'', q.na ? 'yes' : '', q.rem||'', q.ph ? (P.code||P.name||'project').replace(/[^\w\-]+/g, '_')+'_P'+String(n).padStart(3, '0')+'_R'+String(i+1).padStart(2, '0')+'_'+String(x.n||'room').replace(/[^\w\-]+/g, '-').replace(/^-|-$/g, '')+(q.na ? '_NA' : num(q.v)!=null ? '_'+q.v+'lx' : '')+'.jpg' : '', q.ai && q.ai.v!=null ? q.ai.v : '', q.ai ? q.ai.c : '', q.x, q.y], 2); }));
-  const sheets = [wwxSheet({cells:c1, widths:[6,30,10,8,10,13,13,10,10,8,13,22], freeze:5}), wwxSheet({cells:c2, widths:[10,9,30,18,10,13,30,44,13,13,13,13], freeze:1})], names = ['Summary','Points'];
+  const c2 = []; put(c2, 1, ['Point No.','Room No.','Room','Lux (least daylight)','Lux (day)','Not measured','Remark','Photo file','AI read (lux)','AI confidence','X (% of layout)','Y (% of layout)','Point standard (lux)','Point standard reason'], 1);
+  let n = 0, row = 2; rooms.forEach((x, i) => (x.pts||[]).forEach(q => { n++; put(c2, row++, [n, i+1, x.n||'', q.v||'', q.day||'', q.na ? 'yes' : '', q.rem||'', q.ph ? (P.code||P.name||'project').replace(/[^\w\-]+/g, '_')+'_P'+String(n).padStart(3, '0')+'_R'+String(i+1).padStart(2, '0')+'_'+String(x.n||'room').replace(/[^\w\-]+/g, '-').replace(/^-|-$/g, '')+(q.na ? '_NA' : num(q.v)!=null ? '_'+q.v+'lx' : '')+'.jpg' : '', q.ai && q.ai.v!=null ? q.ai.v : '', q.ai ? q.ai.c : '', q.x, q.y, ptCustom(q) ? q.std : '', String(q.sn||'').trim()], 2); }));
+  const sheets = [wwxSheet({cells:c1, widths:[6,30,10,8,10,13,13,10,10,8,13,22], freeze:5}), wwxSheet({cells:c2, widths:[10,9,30,18,10,13,30,44,13,13,13,13,14,36], freeze:1})], names = ['Summary','Points'];
   const files = {
     '[Content_Types].xml':enc('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="'+ct+'.sheet.main+xml"/>'+names.map((_, i) => '<Override PartName="/xl/worksheets/sheet'+(i+1)+'.xml" ContentType="'+ct+'.worksheet+xml"/>').join('')+'<Override PartName="/xl/styles.xml" ContentType="'+ct+'.styles+xml"/></Types>'),
     '_rels/.rels':enc('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>'),
@@ -4318,6 +4340,6 @@ async function boot(){
 }
 /* the web build (own login) runs AM_PRE first: sign-in, then it provides the same window.claude API */
 (window.AM_PRE ? window.AM_PRE() : Promise.resolve()).then(boot, e => { console.error(e); boot(); });
-try{ if(localStorage.getItem('am_test_hooks')==='1') window.__lx = {S, P_, roomsOf, putRoom, putProject, flushAll, RTG, dxKey, dxfMatchPlan}; }catch(e){ /* storage unavailable */ }   /* tests only */
+try{ if(localStorage.getItem('am_test_hooks')==='1') window.__lx = {S, P_, roomsOf, putRoom, rStats, ptStd, ptCustom, stdOf, putProject, flushAll, RTG, dxKey, dxfMatchPlan}; }catch(e){ /* storage unavailable */ }   /* tests only */
 })();
 </script></body></html>
