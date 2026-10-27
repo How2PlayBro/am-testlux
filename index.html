@@ -241,7 +241,7 @@ details summary{cursor:pointer}
 </head><body><div id="app"></div>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
 <script src="config.js"></script>
-<script>window.AM_VER='v25.10';</script><script>
+<script>window.AM_VER='v25.13';</script><script>
 /* ===== AM Test Lux — web platform (Supabase) =====
    The app talks to one small API (Data API v1, see web/API.md):
      db.doc(path).get/set/update/delete/onSnapshot · db.collection(path).get/onSnapshot/doc
@@ -276,7 +276,7 @@ function applyChange(path, data){
   const d = docs.get(path); if(d){ d.data = data==null ? null : data; later('d'+path); }
 }
 async function fetchCol(col){
-  const out = new Map(); const N = 1000;
+  const out = new Map(); const N = BLOB.test(col) ? 8 : 1000;   /* v25.10: picture rows are ~190 KB each — read them 8 at a time (1000 at once timed out on a project with ~180 photos, so Backup never finished) */
   for(let from = 0; ; from += N){
     const {data, error} = await sb.from(BLOB.test(col) ? 'blobs' : 'docs').select('path,data').eq('col', col).order('path').range(from, from+N-1);
     if(error) throw fail(error, 'อ่านข้อมูลไม่สำเร็จ'); data.forEach(r => out.set(r.path, r.data)); if(data.length < N) break;
@@ -457,7 +457,10 @@ const S = {db:null, user:null, dl:null, canW:false, me:'', projects:{}, pLoaded:
    client : ผลลัพธ์ · รายงาน (เลือกตัวเลือกรายงานได้ แต่ไม่บันทึก)
    Someone the owner shared the link with as view-only can never write, so they are always client.
    This decides what each person SEES; who may open / change the data at all is the claude.ai share setting. */
-const ROLE_TH = {admin:'Admin', team:'ทีมงาน', client:'ลูกค้า'};
+/* v25.13: same role names as MEP Inspection. Stored values stay admin|team|client (database rule am_role() unchanged):
+   admin page-wide = BD Team · admin inside one project only = PM · team = Foreman · client = Client */
+const ROLE_TH = {admin:'BD Team', team:'Foreman', client:'Client'};
+const roleName = () => S.role==='admin' ? (S.gRole==='admin' ? 'BD Team' : 'PM') : ROLE_TH[S.role];
 const ROLE_TABS = {admin:['setup','meas','res','rep'], team:['meas','res','rep'], client:['res','rep']};
 /* roles: one for the whole page (access/roles.m) + per project (อ่ำ 23 ต.ค.): access/roles.p[pid][userId] = 'admin'|'team'|'client'|'none',
    access/roles.pv[pid] = 'listed' → only the people named for that project see it. The owner and page Admins see every project.
@@ -870,8 +873,8 @@ function render(){
   const r = S.route, P = r.pid ? P_(r.pid) : null;
   const top = h('header',{class:'top gut'}, h('div',{class:'in wrap'},
     h('button',{class:'brand',on:{click:() => go({v:'home'})}}, 'AM ', h('span',{style:'color:var(--accent)'},'Electric'), h('span',{class:'lx'},'LUX'), h('span',{style:'font-weight:500;opacity:.85'},'Test Lux')),
-    h('div',{class:'who',id:'who'}, !S.db || !S.aLoaded ? '' : ROLE_TH[S.role]+(S.role==='admin' ? ' · แก้ไขได้ทั้งหมด' : S.role==='team' ? ' · กรอกค่าได้' : ' · ดูผลและรายงาน')),
-    S.gRole==='admin' && S.aLoaded ? h('button',{class:'thbtn',id:'roles-btn',title:'กำหนดว่าใครเป็น Admin / ทีมงาน / ลูกค้า',on:{click:rolesDlg}}, '👥', h('span',{class:'tx'}, ' สิทธิ์')) : null,
+    h('div',{class:'who',id:'who'}, !S.db || !S.aLoaded ? '' : roleName()+(S.role==='admin' ? (S.gRole==='admin' ? ' · แก้ไขได้ทั้งหมด' : ' · แก้ไขได้ทั้งโครงการ') : S.role==='team' ? ' · กรอกค่าได้' : ' · ดูผลและรายงาน')),
+    S.gRole==='admin' && S.aLoaded ? h('button',{class:'thbtn',id:'roles-btn',title:'กำหนดว่าใครเป็น BD Team / PM / Foreman / Client',on:{click:rolesDlg}}, '👥', h('span',{class:'tx'}, ' สิทธิ์')) : null,
     ...(window.AM_HDR ? [].concat(window.AM_HDR()) : []),
     S.me && S.aLoaded && S.gRole!=='admin' && !window.AM_WEB ? h('button',{class:'thbtn',id:'myid-btn',title:'รหัสผู้ใช้ของฉัน — ส่งให้ Admin เพื่อขอสิทธิ์',on:{click:myIdDlg}}, '🪪', h('span',{class:'tx'}, ' รหัสของฉัน')) : null,
     h('button',{class:'thbtn',id:'theme',title:'สลับโหมดสี: อัตโนมัติ → สว่าง → มืด','aria-label':'โหมดสี '+TH_LBL[TH.mode].slice(2),on:{click:thNext}}, TH_LBL[TH.mode].slice(0, 1), h('span',{class:'tx'}, ' '+TH_LBL[TH.mode].slice(2)))));
@@ -880,9 +883,9 @@ function render(){
   if(S.err) page.append(h('div',{class:'banner warn',role:'alert'}, S.err));
   if(!S.db){ page.append(h('div',{class:'card'}, h('h2',null,'เปิดหน้านี้จาก claude.ai'), h('div',null,'ข้อมูลผลวัดแสงเก็บในระบบของ claude.ai — ต้องเข้าสู่ระบบ claude.ai ก่อนจึงจะเห็นข้อมูล'))); return; }
   if(!S.pLoaded || !S.aLoaded){ page.append(h('div',{class:'empty'},'กำลังโหลดข้อมูล…')); return; }
-  if(S.viewAs) page.append(h('div',{class:'banner',id:'viewas'}, h('div',{class:'row'}, h('span',null,'กำลังดูในมุมมอง '), h('b',null, ROLE_TH[S.viewAs]), h('span',{class:'note'},' — สิ่งที่เปลี่ยนในโหมดนี้ไม่ถูกบันทึกเมื่อเป็นมุมมองลูกค้า'), h('span',{class:'sp'}),
-    h('button',{class:'btn sm',id:'viewas-off',on:{click:() => { S.viewAs = ''; roleCalc(); render(); }}}, 'กลับเป็น Admin'))));
-  if(S.roleCap) page.append(h('div',{class:'banner warn',id:'rolecap'}, 'บัญชีนี้ถูกตั้งเป็น '+ROLE_TH[S.roleCap]+' แต่ลิงก์ที่แชร์ให้เป็นแบบดูอย่างเดียว จึงเห็นแบบลูกค้า — ให้เจ้าของแชร์ใหม่เป็นสิทธิ์ที่ใช้งาน (Contributor) ขึ้นไป'));
+  if(S.viewAs) page.append(h('div',{class:'banner',id:'viewas'}, h('div',{class:'row'}, h('span',null,'กำลังดูในมุมมอง '), h('b',null, ROLE_TH[S.viewAs]), h('span',{class:'note'},' — สิ่งที่เปลี่ยนในโหมดนี้ไม่ถูกบันทึกเมื่อเป็นมุมมอง Client'), h('span',{class:'sp'}),
+    h('button',{class:'btn sm',id:'viewas-off',on:{click:() => { S.viewAs = ''; roleCalc(); render(); }}}, 'กลับเป็น BD Team'))));
+  if(S.roleCap) page.append(h('div',{class:'banner warn',id:'rolecap'}, 'บัญชีนี้ถูกตั้งเป็น '+ROLE_TH[S.roleCap]+' แต่ลิงก์ที่แชร์ให้เป็นแบบดูอย่างเดียว จึงเห็นแบบ Client — ให้เจ้าของแชร์ใหม่เป็นสิทธิ์ที่ใช้งาน (Contributor) ขึ้นไป'));
   if(r.v==='proj' && P && S.noAccess){ page.append(h('div',{class:'card empty',id:'no-access'}, h('h3',null,'ไม่มีสิทธิ์ดูโครงการนี้'), h('div',null,window.AM_WEB ? 'ติดต่อ Admin ของ AM Electric เพื่อขอสิทธิ์' : 'ส่งรหัสผู้ใช้ให้ Admin เพื่อขอสิทธิ์'), S.me && !window.AM_WEB ? h('button',{class:'btn primary',id:'myid-na',on:{click:myIdDlg}},'🪪 รหัสผู้ใช้ของฉัน') : null, h('button',{class:'btn',on:{click:() => go({v:'home'})}},'‹ ทุกโครงการ'))); return; }
   if(r.v==='proj' && P){ subRooms(r.pid); if(!S.rLoaded[r.pid]){ page.append(h('div',{class:'empty'},'กำลังโหลดห้อง…')); return; } viewProject(page, r.pid); }
   else viewHome(page);
@@ -932,7 +935,7 @@ function viewHome(page){
   page.append(h('div',{class:'row',style:'align-items:flex-end'},
     h('div',{style:'display:flex;flex-direction:column;gap:4px;min-width:0'}, h('div',{class:'eyebrow'},'Test & Commissioning · Lighting'), h('h1',null,'ผลวัดความเข้มแสง (Lux) รายโครงการ'),
       h('div',{class:'note'},'วางจุดวัดบนแบบทุก 2 × 2 ม. · กรอกค่าหน้างาน · สรุปผลเทียบมาตรฐานรายห้อง')),
-    h('span',{class:'sp'}), isAdm() ? h('div',{class:'row',style:'gap:8px'}, h('button',{class:'btn',id:'bk-open',title:'ดาวน์โหลดไฟล์ Backup ของโครงการที่เลือก',on:{click:() => backupDlg()}}, '💾 Backup'), h('button',{class:'btn',id:'im-open',title:'นำเข้าโครงการจากไฟล์ Backup',on:{click:importDlg}}, '📥 นำเข้า'), h('button',{class:'btn primary',id:'new-proj',on:{click:newProjectDlg}}, '+ โครงการใหม่')) : null));
+    h('span',{class:'sp'}), isAdm() ? h('div',{class:'row',style:'gap:8px'}, h('button',{class:'btn',id:'bk-open',title:'ดาวน์โหลดไฟล์ Backup ของโครงการที่เลือก',on:{click:() => backupDlg()}}, '💾 Backup'), h('button',{class:'btn',id:'sz-open',title:'ดูขนาดข้อมูลแต่ละโครงการ · ลบโครงการ',on:{click:sizeDlg}}, '📊 ขนาดข้อมูล'), h('button',{class:'btn',id:'im-open',title:'นำเข้าโครงการจากไฟล์ Backup',on:{click:importDlg}}, '📥 นำเข้า'), h('button',{class:'btn primary',id:'new-proj',on:{click:newProjectDlg}}, '+ โครงการใหม่')) : null));
   if(isAdm()) page.append(storeReminder());
   if(!list.length){ page.append(h('div',{class:'card empty'}, h('h3',null,'ยังไม่มีโครงการ'), h('div',null, isAdm() ? 'กด "+ โครงการใหม่" แล้วอัปโหลดแบบ Layout (รูปหรือ PDF) เพื่อเริ่ม' : 'ยังไม่มีโครงการที่คุณมีสิทธิ์ดู — '+(window.AM_WEB ? 'ติดต่อ Admin ของ AM Electric' : 'ส่งรหัสผู้ใช้ให้ Admin เพื่อขอสิทธิ์')), !isAdm() && S.me && !window.AM_WEB ? h('button',{class:'btn primary',id:'myid-home',on:{click:myIdDlg}},'🪪 รหัสผู้ใช้ของฉัน') : null)); return; }
   page.append(h('div',{class:'grid'}, list.map(P => {
@@ -3690,7 +3693,7 @@ function rolesDlg(){
   const AC = window.AM_ADMIN || null, accts = {};
   const loadAccts = async () => { if(!AC) return; try{ (await AC.list()).forEach(u => { accts[u.id] = u; }); draw(); }catch(e){ msg.textContent = 'โหลดรายชื่อบัญชีไม่ได้: '+errMsg(e); } };
   const list = h('div',{class:'rl-list',id:'rl-list'}), msg = h('div',{class:'note',id:'rl-msg',role:'status'});
-  const OPTS = [['','ค่าเริ่มต้น'],['admin','Admin'],['team','ทีมงาน'],['client','ลูกค้า']];
+  const OPTS = [['','ค่าเริ่มต้น'],['admin','BD Team (Admin ทุกโครงการ)'],['team','Foreman'],['client','Client']];
   const ago = t => { if(!t) return ''; const d = (Date.now()-Date.parse(t))/864e5; return d < 1 ? 'เปิดล่าสุดวันนี้' : 'เปิดล่าสุด '+Math.round(d)+' วันก่อน'; };
   const draw = async () => {
     const ids = [...new Set([S.me, ...Object.keys(m), ...Object.keys(seen), ...Object.keys(accts), ...ppl, ...Object.values(pm).flatMap(o => Object.keys(o||{}))])].filter(id => id && (id===S.me || !hid.has(id)));
@@ -3718,7 +3721,7 @@ function rolesDlg(){
         h('button',{class:'btn ghost sm','data-ban':id,title:ac.banned ? 'เปิดให้เข้าใช้งานได้อีกครั้ง' : 'ระงับไม่ให้เข้าใช้งาน (ข้อมูลที่เคยกรอกยังอยู่)',on:{click:async e => { const b = e.currentTarget;
           if(!b.dataset.arm){ b.dataset.arm = '1'; b.textContent = 'กดอีกครั้ง'; return; } b.disabled = true;
           try{ await AC.ban(id, !ac.banned); ac.banned = !ac.banned; msg.textContent = (ac.banned ? 'ระงับ ' : 'เปิดใช้ ')+nmOf(id, p)+' แล้ว'; draw(); }catch(er){ msg.textContent = 'ไม่สำเร็จ: '+errMsg(er); b.disabled = false; } }}}, ac.banned ? 'เปิดใช้' : 'ระงับ')) : null;
-      const right = mine ? h('span',{class:'pill acc'}, h('i'), 'เจ้าของ · Admin เสมอ')
+      const right = mine ? h('span',{class:'pill acc'}, h('i'), 'เจ้าของ · BD Team เสมอ')
         : (() => { const s2 = sel(OPTS, m[id]||'', v => { if(v) m[id] = v; else delete m[id]; dirty = true; msg.textContent = 'ยังไม่บันทึก'; }, 'สิทธิ์ของ '+nmOf(id, p)); s2.style.cssText = 'width:auto;min-height:36px'; s2.dataset.uid = id; return s2; })();
       const del = mine || id===S.me ? null : h('button',{class:'btn ghost sm rl-del','data-del':id,title:'เอาออกจากรายชื่อ (ลบสิทธิ์หลักและสิทธิ์ทุกโครงการของคนนี้)',on:{click:e => { const b = e.currentTarget; if(!b.dataset.arm){ b.dataset.arm = '1'; b.textContent = 'กดอีกครั้ง'; return; }
         delete m[id]; delete nm[id]; Object.values(pm).forEach(o => { if(o) delete o[id]; }); ppl.delete(id); hid.add(id); dirty = true; msg.textContent = 'ยังไม่บันทึก · คนที่เอาออกยังเปิดลิงก์ได้ถ้ายังแชร์ให้อยู่ — ตัดสิทธิ์จริงที่ปุ่ม Share'; draw(); }}}, 'ลบ');
@@ -3728,24 +3731,26 @@ function rolesDlg(){
     if(!curP){ plist.replaceChildren(h('div',{class:'note'},'ยังไม่มีโครงการ')); return; }
     const listed = pv[curP]==='listed', pr = pm[curP] = pm[curP]||{};
     pmode.replaceChildren(...[['','ทุกคนตามสิทธิ์หลัก'],['listed','เฉพาะคนที่ระบุ']].map(([k, l]) => h('button',{'aria-pressed':String((pv[curP]||'')===k),'data-v':k,on:{click:() => { if(k) pv[curP] = k; else delete pv[curP]; dirty = true; msg.textContent = 'ยังไม่บันทึก'; draw(); }}}, l)));
-    const POPT = [['', listed ? 'ไม่เห็น (ไม่ได้ระบุ)' : 'ตามสิทธิ์หลัก'],['admin','Admin'],['team','ทีมงาน'],['client','ลูกค้า']].concat(listed ? [] : [['none','ไม่เห็นโครงการนี้']]);
+    const POPT = [['', listed ? 'ไม่เห็น (ไม่ได้ระบุ)' : 'ตามสิทธิ์หลัก'],['admin','PM (Admin ในโครงการนี้)'],['team','Foreman'],['client','Client']].concat(listed ? [] : [['none','ไม่เห็นโครงการนี้']]);
     plist.replaceChildren(...ids.map(id => { const p = ps[id]||{}, nb = h('b'); nb.textContent = nmOf(id, p)+(id===S.me ? ' · คุณ' : '');
       const glob = (id===S.me && S.isOwner) || m[id]==='admin';
-      const right = glob ? h('span',{class:'pill acc'}, h('i'), id===S.me && S.isOwner ? 'เจ้าของ · เห็นทุกโครงการ' : 'Admin หลัก · เห็นทุกโครงการ')
+      const right = glob ? h('span',{class:'pill acc'}, h('i'), id===S.me && S.isOwner ? 'เจ้าของ · เห็นทุกโครงการ' : 'BD Team · เห็นทุกโครงการ')
         : (() => { const v0 = pr[id]==='none' && listed ? '' : (pr[id]||''); const s2 = sel(POPT, v0, v => { if(v) pr[id] = v; else delete pr[id]; dirty = true; msg.textContent = 'ยังไม่บันทึก'; }, 'สิทธิ์ในโครงการนี้ของ '+nmOf(id, p)); s2.style.cssText = 'width:auto;min-height:36px'; s2.dataset.puid = id; return s2; })();
       return h('div',{class:'rl-row','data-puid':id}, h('div',{class:'rl-nm'}, nb), right); }));
   };
   const pSel = projs.length ? sel(projs.map(P => [P.id, (P.code ? P.code+' · ' : '')+(P.name||'')]), curP, v => { curP = v; draw(); }, 'โครงการ') : null; if(pSel){ pSel.id = 'rl-proj'; pSel.style.cssText = 'width:auto;min-height:38px;max-width:100%'; }
   /* add someone from the organization who has not opened the page yet */
   const q = h('input',{type:'search',id:'rl-q',placeholder:'พิมพ์ชื่อหรืออีเมลเพื่อเพิ่มคน',autocomplete:'off'}), hits = h('div',{class:'rl-hits',id:'rl-hits'});
-  const addRole = sel([['team','ทีมงาน'],['client','ลูกค้า'],['admin','Admin']], 'team', () => {}, 'สิทธิ์ของคนที่เพิ่ม'); addRole.style.cssText = 'width:auto;min-height:40px';
+  const addRole = sel([['team','Foreman'],['client','Client'],['admin','BD Team (Admin ทุกโครงการ)']], 'team', () => {}, 'สิทธิ์ของคนที่เพิ่ม'); addRole.style.cssText = 'width:auto;min-height:40px';
+  /* the same stored value 'admin' reads BD Team page-wide and PM inside one project */
+  const setAddOpts = () => { const v = addRole.value, proj = typeof addTo!=='undefined' && addTo.value==='proj'; addRole.replaceChildren(...[['team','Foreman'],['client','Client'],['admin',proj ? 'PM (Admin ในโครงการนี้)' : 'BD Team (Admin ทุกโครงการ)']].map(([k, l]) => h('option',{value:k},l))); addRole.value = v; };
   const find = async () => { if(!S.user || !S.user.search){ hits.replaceChildren(h('div',{class:'note'},'ค้นหาคนไม่ได้ในมุมมองนี้')); return; }
     const r = await S.user.search(q.value.trim());
     hits.replaceChildren(...(r||[]).filter(p => p.id && p.id!==S.me).map(p => { const t = h('span'); t.textContent = p.name+(p.email ? ' · '+p.email : '');
       return h('button',{class:'btn sm ghost rl-hit','data-uid':p.id,on:{click:() => { if(addTo.value==='proj' && curP){ (pm[curP] = pm[curP]||{})[p.id] = addRole.value; } else m[p.id] = addRole.value; ppl.add(p.id); hid.delete(p.id); dirty = true; msg.textContent = 'ยังไม่บันทึก'; q.value = ''; hits.replaceChildren(); draw(); }}}, '+ ', t); }),
       ...((r||[]).length ? [] : [(q.value.trim() ? (window.AM_WEB ? h('div',{class:'note rl-miss'}, h('b',null,'ไม่พบผู้ใช้'), ' — สร้างบัญชีที่กล่อง "สร้างบัญชีใหม่" ด้านบน') : h('div',{class:'note rl-miss'}, h('b',null,'ไม่พบในองค์กร'), ' — ช่องนี้ค้นได้เฉพาะคนในองค์กร claude.ai ของคุณ (ค้นด้วยชื่อ) · คนนอกองค์กร เช่น อีเมล Gmail ส่วนตัว: ถ้าแชร์ให้ใช้งานได้ (Contributor ขึ้นไป) ให้เขาเปิดลิงก์ 1 ครั้ง ชื่อจะขึ้นในรายชื่อเอง · ถ้าแชร์ให้ดูอย่างเดียว ใช้ "เพิ่มด้วยรหัส" ด้านล่าง')) : h('div',{class:'note'}, ''))]));
   };
-  const addTo = sel([['all','เป็นสิทธิ์หลัก (ทุกโครงการ)'],['proj','เฉพาะโครงการที่เลือกด้านล่าง']], 'all', () => {}, 'เพิ่มเป็นสิทธิ์แบบไหน'); addTo.id = 'rl-addto'; addTo.style.cssText = 'width:auto;min-height:40px';
+  const addTo = sel([['all','เป็นสิทธิ์หลัก (ทุกโครงการ)'],['proj','เฉพาะโครงการที่เลือกด้านล่าง']], 'all', () => setAddOpts(), 'เพิ่มเป็นสิทธิ์แบบไหน'); addTo.id = 'rl-addto'; addTo.style.cssText = 'width:auto;min-height:40px';
   /* add by user code (อ่ำ 24 ต.ค.): view-only guests cannot register themselves, so they copy their code (🪪 รหัสของฉัน) and send it */
   const cIn = h('input',{type:'text',id:'rl-code',placeholder:'วางรหัสผู้ใช้ / ข้อความที่เขาคัดลอกส่งมา',autocomplete:'off',spellcheck:'false'});
   const cNm = h('input',{type:'text',id:'rl-code-nm',placeholder:'ชื่อเรียก',maxlength:'60',autocomplete:'off'}), cMsg = h('div',{class:'note',id:'rl-code-msg',role:'status'});
@@ -3773,7 +3778,7 @@ function rolesDlg(){
       const proj = addTo.value==='proj' && curP; if(proj){ (pm[curP] = pm[curP]||{})[u.id] = addRole.value; } else m[u.id] = addRole.value;
       ppl.add(u.id); hid.delete(u.id); accts[u.id] = {id:u.id, login:u.login||login, banned:false, last:null}; dirty = true;
       const saved = await saveRoles();
-      const role = {admin:'Admin', team:'ทีมงาน', client:'ลูกค้า'}[addRole.value]+(proj ? ' เฉพาะ '+((S.projects[curP]||{}).name||'') : ' (ทุกโครงการ)');
+      const role = {admin:(proj ? 'PM' : 'BD Team'), team:'Foreman', client:'Client'}[addRole.value]+(proj ? ' เฉพาะ '+((S.projects[curP]||{}).name||'') : ' (ทุกโครงการ)');
       const txt = 'AM Test Lux\nเว็บ: '+location.origin+location.pathname+'\nID: '+(u.login||login)+'\nรหัสผ่านเริ่มต้น: '+pass+'\nเข้าครั้งแรกระบบจะให้ตั้งรหัสผ่านใหม่';
       const ta = h('textarea',{rows:'5',readonly:'readonly',class:'mono',id:'ac-text'}); ta.value = txt;
       acOut.replaceChildren(h('div',{class:'banner'}, h('b',null,'สร้างบัญชี '+(name||login)+' แล้ว · สิทธิ์ '+role+(saved ? '' : ' (ยังไม่ได้บันทึกสิทธิ์ — กดบันทึก)')), ta,
@@ -3783,10 +3788,10 @@ function rolesDlg(){
     acGo.disabled = false;
   }}}, '+ สร้างบัญชี');
   q.addEventListener('input', find); q.addEventListener('focus', find);
-  const defSeg = h('span',{class:'seg',id:'rl-def'}, [['team','ทีมงาน'],['client','ลูกค้า']].map(([k, l]) => h('button',{'aria-pressed':String(defW===k),'data-v':k,on:{click:e => { defW = k; dirty = true; msg.textContent = 'ยังไม่บันทึก'; e.currentTarget.parentNode.querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.v===k))); }}}, l)));
+  const defSeg = h('span',{class:'seg',id:'rl-def'}, [['team','Foreman'],['client','Client']].map(([k, l]) => h('button',{'aria-pressed':String(defW===k),'data-v':k,on:{click:e => { defW = k; dirty = true; msg.textContent = 'ยังไม่บันทึก'; e.currentTarget.parentNode.querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.v===k))); }}}, l)));
   const tbl = h('table',{class:'t rl-tbl'}, h('thead',null, h('tr',null, ['สิทธิ์','ตั้งค่า','กรอกค่า','ผลลัพธ์','รายงาน'].map(x => h('th',null,x)))),
-    h('tbody',null, [['Admin',1,1,1,1,'+ จัดการสิทธิ์'],['ทีมงาน',0,1,1,1,''],['ลูกค้า',0,0,1,1,'ดู / ดาวน์โหลด']].map(([n, ...f]) => h('tr',null, h('td',null, h('b',null,n), f[4] ? h('div',{class:'note'}, f[4]) : null), f.slice(0, 4).map(x => h('td',{class:'c'}, x ? '✓' : '–'))))));
-  const view = h('span',{class:'seg',id:'rl-view'}, [['','Admin'],['team','ทีมงาน'],['client','ลูกค้า']].map(([k, l]) => h('button',{'aria-pressed':String((S.viewAs||'')===k),'data-v':k,on:{click:() => { close(); S.viewAs = k; roleCalc(); S.route.tab = ''; render(); window.scrollTo(0, 0); }}}, l)));
+    h('tbody',null, [['BD Team',1,1,1,1,'+ จัดการสิทธิ์ · เห็นทุกโครงการ'],['PM',1,1,1,1,'Admin เฉพาะโครงการที่ได้รับ (จัดการสิทธิ์ไม่ได้)'],['Foreman',0,1,1,1,''],['Client',0,0,1,1,'ดู / ดาวน์โหลด']].map(([n, ...f]) => h('tr',null, h('td',null, h('b',null,n), f[4] ? h('div',{class:'note'}, f[4]) : null), f.slice(0, 4).map(x => h('td',{class:'c'}, x ? '✓' : '–'))))));
+  const view = h('span',{class:'seg',id:'rl-view'}, [['','BD Team'],['team','Foreman'],['client','Client']].map(([k, l]) => h('button',{'aria-pressed':String((S.viewAs||'')===k),'data-v':k,on:{click:() => { close(); S.viewAs = k; roleCalc(); S.route.tab = ''; render(); window.scrollTo(0, 0); }}}, l)));
   async function saveRoles(){
       Object.keys(pm).forEach(k => { if(!Object.keys(pm[k]||{}).length) delete pm[k]; });
       Object.keys(m).forEach(k => ppl.add(k)); Object.values(pm).forEach(o => Object.keys(o||{}).forEach(k => ppl.add(k)));
@@ -3804,13 +3809,13 @@ function rolesDlg(){
     h('div',{class:'row'}, h('div',{style:'flex:1 1 220px;min-width:0'}, q), addRole, addTo), hits,
     window.AM_WEB ? null : h('div',{class:'rl-code'}, h('b',null,'คนนอกองค์กร / ลูกค้าที่แชร์ให้ดูอย่างเดียว'), h('div',{class:'note'},'ให้เขาเปิดลิงก์ → กดปุ่ม 🪪 รหัสของฉัน มุมบนขวา → คัดลอกส่งมาทาง LINE → วางที่ช่องนี้ (ใช้สิทธิ์และ "เพิ่มเป็น" จากช่องด้านบน)'),
       h('div',{class:'row'}, h('div',{style:'flex:2 1 220px;min-width:0'}, cIn), h('div',{style:'flex:1 1 140px;min-width:0'}, cNm), cAdd), cMsg),
-    h('h3',null,'สิทธิ์แยกตามโครงการ'), h('div',{class:'note'},'ใช้ให้ลูกค้า / ทีมงานเห็นเฉพาะโครงการของตัวเอง หรือให้สิทธิ์ต่างจากสิทธิ์หลักในบางโครงการ · Admin หลักและเจ้าของเห็นทุกโครงการ'),
+    h('h3',null,'สิทธิ์แยกตามโครงการ'), h('div',{class:'note'},'ใช้ให้ Client / Foreman เห็นเฉพาะโครงการของตัวเอง หรือตั้ง PM ประจำโครงการ (Admin เฉพาะโครงการนั้น) · BD Team และเจ้าของเห็นทุกโครงการ'),
     pSel, pmode, plist,
     window.AM_WEB ? h('div',{class:'banner',id:'rl-pnote'}, 'สิทธิ์รายโครงการบังคับที่ฐานข้อมูล — คนที่ไม่มีสิทธิ์ในโครงการ ดึงข้อมูลโครงการนั้นไม่ได้ · คนที่ให้สิทธิ์เฉพาะบางโครงการ (ไม่อยู่ในสิทธิ์หลัก) เห็นเฉพาะโครงการเหล่านั้น') : h('div',{class:'banner warn',id:'rl-pnote'}, 'การซ่อนโครงการนี้กำหนด "สิ่งที่เห็นในแอป" — ข้อมูลทุกโครงการยังอยู่ในฐานข้อมูลเดียวกันของหน้านี้ ถ้าต้องการให้ลูกค้าต่างบริษัทแยกกันจริง ควรใช้แอปแยกคนละลิงก์ต่อลูกค้า (แจ้ง Sera)'),
-    h('h3',null,'ทดลองดูในมุมมองของ'), view, h('div',{class:'note'}, 'ใช้ตรวจว่าทีมงาน / ลูกค้าเห็นอะไร — ไม่เปลี่ยนสิทธิ์ของใคร'), msg),
+    h('h3',null,'ทดลองดูในมุมมองของ'), view, h('div',{class:'note'}, 'ใช้ตรวจว่า Foreman / Client เห็นอะไร — ไม่เปลี่ยนสิทธิ์ของใคร'), msg),
     cls => [h('button',{class:'btn',on:{click:cls}},'ปิด'), h('button',{class:'btn primary',id:'rl-save',on:{click:async () => {
       if(!dirty){ cls(); return; }
-      if(await saveRoles()) cls(); else msg.textContent = 'บันทึกไม่ได้ — ต้องเป็นเจ้าของหรือ Admin';
+      if(await saveRoles()) cls(); else msg.textContent = 'บันทึกไม่ได้ — ต้องเป็นเจ้าของหรือ BD Team';
     }}}, 'บันทึก')]);
   draw(); loadAccts();
   S.db.collection('seen').get().then(sn => { sn.docs.forEach(d => { seen[d.id] = d.data()||{}; }); draw(); }).catch(() => {});
@@ -3912,6 +3917,7 @@ function backupDlg(pre){
       const zip = await rtZip(files), one = metas.length===1 ? (metas[0].code || metas[0].name || metas[0].pid) : metas.length+'projects';
       const name = 'AMTestLux_Backup_'+String(one).replace(/[^\w\-]+/g, '_').slice(0, 40)+'_'+today()+'.zip';
       const r = await S.dl.save({filename:name, data:new Blob([zip], {type:'application/zip'})});
+      if(r && r.status==='saved') metas.forEach(m => { putProject(m.pid, {lastBackup:{at:nowIso(), by:S.me, file:name, bytes:zip.length}}); delete SZ[m.pid]; });   /* v25.11: remembered, shown in the size dialog */
       msg.textContent = (r && r.status==='saved' ? 'บันทึกแล้ว · ' : '')+name+' · '+bkMB(zip.length)+' · '+metas.map(m => (m.name||m.pid)+' ('+m.rooms+' ห้อง, '+m.photos+' รูป)').join(', ')+' · '+Math.round((Date.now()-t0)/1000)+' วินาที';
     }catch(e){ if(!(e && /declin|cancel|dismiss/i.test(String(e.code||'')))) msg.textContent = 'Backup ไม่สำเร็จ: '+errMsg(e); }
     go.disabled = !pick.size;
@@ -3928,16 +3934,30 @@ function importDlg(){
   let Z = null, man = null; const choice = {};
   const draw = () => {
     list.replaceChildren(...man.projects.map(m => {
-      const c = choice[m.pid] = choice[m.pid] || {on:true, mode:'copy', name:''}, exists = !!S.projects[m.pid];
+      const c = choice[m.pid] = choice[m.pid] || {on:true, mode:'copy', name:'', target:'', ok:false}, tg = imTargets();
+      if(!tg.some(P => P.id===c.target)) c.target = (tg.find(P => P.id===m.pid) || tg.find(P => m.code && P.code===m.code) || tg.find(P => m.name && P.name===m.name) || tg[0] || {}).id || '';
       const cb = h('input',{type:'checkbox','data-pid':m.pid}); cb.checked = c.on; cb.addEventListener('change', () => { c.on = cb.checked; upd(); });
-      const modes = h('span',{class:'seg','data-pid':m.pid}, [['copy','สร้างเป็นโครงการใหม่ (สำเนา)']].concat(exists ? [['replace','แทนที่โครงการเดิม (กู้คืน)']] : []).map(([k, l]) =>
+      const modes = h('span',{class:'seg','data-pid':m.pid}, [['copy','สร้างเป็นโครงการใหม่ (สำเนา)']].concat(tg.length ? [['replace','เขียนทับโครงการที่มีอยู่']] : []).map(([k, l]) =>
         h('button',{'aria-pressed':String(c.mode===k),'data-mode':k,on:{click:() => { c.mode = k; draw(); }}}, l)));
       return h('div',{class:'bk-row bk-im'}, cb, h('div',{class:'bk-nm'}, h('b',null, m.name||m.pid), h('span',{class:'note'}, [m.code, m.rooms+' ห้อง', m.photos+' รูป', bkMB(m.bytes)].filter(Boolean).join(' · ')),
-        modes, c.mode==='replace' ? h('div',{class:'banner warn'}, 'ข้อมูลปัจจุบันของ "'+(S.projects[m.pid].name||m.pid)+'" จะถูกแทนที่ด้วยข้อมูลในไฟล์ทั้งหมด (ห้อง ค่าวัด รูป ที่เพิ่มหลังวัน Backup จะหาย)') : null));
+        modes, c.mode==='replace' ? imReplaceBox(m, c, tg) : null));
     }));
     upd();
   };
-  const upd = () => { go.disabled = !man || !man.projects.some(m => choice[m.pid] && choice[m.pid].on); };
+  /* v25.11: overwrite any existing project (not only the one with the same internal id): pick the target, see what it holds, tick to confirm */
+  const imTargets = () => Object.values(S.projects).filter(P => projRole(P.id)==='admin' && !Object.values(S.projects).some(x => x.imgFrom===P.id)).sort((a, b) => String(a.name||'').localeCompare(String(b.name||'')));
+  const imReplaceBox = (m, c, tg) => {
+    const sel = h('select',{'data-pid':m.pid,'aria-label':'โครงการที่จะถูกเขียนทับ'}, tg.map(P => { const o = h('option',{value:P.id}, (P.name||P.id)+(P.code ? ' · '+P.code : '')); if(P.id===c.target) o.selected = true; return o; }));
+    sel.addEventListener('change', () => { c.target = sel.value; c.ok = false; draw(); });
+    const T = S.projects[c.target]||{}, st = S.rooms[c.target] ? pStats(c.target) : null, ck = h('input',{type:'checkbox','data-pid':m.pid,class:'im-ok'}); ck.checked = c.ok;
+    ck.addEventListener('change', () => { c.ok = ck.checked; upd(); });
+    const info = SZ[c.target] ? ' (ตอนนี้ '+szMB(SZ[c.target].total)+', '+SZ[c.target].n.meas+'/'+SZ[c.target].n.pts+' จุดวัดแล้ว, '+SZ[c.target].n.photos+' รูป)' : st ? ' (ตอนนี้ '+(st.meas||0)+'/'+(st.pts||0)+' จุดวัดแล้ว)' : '';
+    return h('div',{class:'banner warn'}, h('label',{class:'fl'}, 'เขียนทับโครงการ', sel),
+      h('div',{class:'note'}, 'ข้อมูลทั้งหมดของ "'+(T.name||c.target)+'"'+info+' จะถูกลบ แล้วใส่ข้อมูลจากไฟล์ ("'+(m.name||m.pid)+'", วัน Backup '+String(man.at||'').slice(0, 10)+') แทน — ห้อง ค่าวัด รูป ที่เพิ่มหลังวัน Backup จะหาย · Storage เต็มอยู่ต้องเคลียร์ให้พอก่อน'),
+      h('label',{class:'row',style:'gap:8px;align-items:flex-start'}, ck, h('span',null, 'ฉันเข้าใจ — ข้อมูลเดิมของโครงการนี้หายถาวร (Backup ไว้แล้ว หรือไม่ต้องการเก็บ)')));
+  };
+  const upd = () => { const on = man ? man.projects.filter(m => choice[m.pid] && choice[m.pid].on) : [], rep = on.filter(m => choice[m.pid].mode==='replace').map(m => choice[m.pid].target);
+    go.disabled = !man || !on.length || on.some(m => choice[m.pid].mode==='replace' && (!choice[m.pid].ok || !choice[m.pid].target)) || new Set(rep).size < rep.length; };
   file.addEventListener('change', async () => {
     const f = file.files[0]; man = null; list.replaceChildren(); upd(); if(!f) return;
     msg.textContent = 'กำลังอ่าน '+f.name+' ('+bkMB(f.size)+')…';
@@ -3953,11 +3973,13 @@ function importDlg(){
     go.disabled = true; file.disabled = true; const done = [];
     try{
       for(const m of man.projects.filter(m => choice[m.pid].on)){
-        const c = choice[m.pid], pid = c.mode==='replace' ? m.pid : uid(), pre = 'p/'+m.pid+'/', dec = new TextDecoder();
+        const c = choice[m.pid], pid = c.mode==='replace' ? c.target : uid(), pre = 'p/'+m.pid+'/', dec = new TextDecoder();
+        if(c.mode==='replace') Object.keys(S.pend).forEach(k => { const q = S.pend[k]; if(q && (q.pid===pid || (q.kind==='p' && q.id===pid))){ clearTimeout(q.t); delete S.pend[k]; } });   /* a waiting write must not undo the overwrite */
         const docs = [...Z.keys()].filter(k => k.startsWith(pre) && k.endsWith('.json')).map(k => [k.slice(pre.length, -5), k]);
-        const P = JSON.parse(dec.decode(Z.get(pre+'project.json'))); delete P.id; delete P.imgFrom;
+        const P = JSON.parse(dec.decode(Z.get(pre+'project.json'))); delete P.id; delete P.imgFrom; delete P.lastBackup;
         if(c.mode==='copy'){ const taken = Object.values(S.projects).some(x => x.name===P.name); if(taken) P.name = (P.name||'โครงการ')+' (สำเนา '+today()+')'; P.createdAt = nowIso(); }
         P.restoredFrom = {at:nowIso(), by:S.me, backupAt:man.at||'', from:man.from||'', pid:m.pid, mode:c.mode};
+        if(c.mode==='replace' && S.projects[pid]){ P.createdAt = S.projects[pid].createdAt || P.createdAt; }
         const sub = docs.filter(([p]) => p!=='project'), blobs = sub.filter(([p]) => !p.startsWith('rooms/')), rooms = sub.filter(([p]) => p.startsWith('rooms/'));
         if(c.mode==='replace'){   /* remove what the backup does not have */
           const keep = new Set(sub.map(([p]) => p)), cur = S.projects[pid]||{};
@@ -3968,7 +3990,7 @@ function importDlg(){
           await S.db.doc('projects/'+pid+'/'+p).set(JSON.parse(dec.decode(Z.get(k)))); n++; msg.textContent = 'นำเข้า '+(P.name||m.pid)+' · '+n+' / '+tot; })); };
         await write(blobs); await write(rooms);
         P.at = nowIso(); P.by = S.me; await S.db.doc('projects/'+pid).set(P);
-        if(c.mode==='replace'){ Object.keys(S.img).forEach(k => { if(k.includes(pid)) delete S.img[k]; }); Object.keys(S.ph||{}).forEach(k => { if(k.startsWith(pid+'/')) delete S.ph[k]; }); }
+        if(c.mode==='replace'){ delete SZ[pid]; Object.keys(S.img).forEach(k => { if(k.includes(pid)) delete S.img[k]; }); Object.keys(S.ph||{}).forEach(k => { if(k.startsWith(pid+'/')) delete S.ph[k]; }); }
         done.push([pid, P.name]);
       }
       msg.textContent = 'นำเข้าเสร็จ ✓ '+done.map(d => d[1]).join(', '); toast('นำเข้าโครงการแล้ว');
@@ -3980,6 +4002,107 @@ function importDlg(){
     h('div',{class:'note'}, 'เลือกไฟล์ AMTestLux_Backup_….zip → เลือกโครงการ → นำเข้า · ค่าเริ่มต้นสร้างเป็นโครงการใหม่ ไม่ทับของเดิม'), file, msg, list),
     cls => [h('button',{class:'btn',on:{click:cls}},'ปิด'), go]);
 }
+/* ---------- v25.11: data size per project + delete project (Admin; อ่ำ 27 ต.ค.) ----------
+   Size = JSON length of every document the project owns (rooms, photos, plans, Cal certificate, logos). A sample project that borrows the
+   drawings of another one (imgFrom) is counted for its own rooms and photos only, and deleting it never touches the lender's documents. */
+const SZ = {};   /* pid → {at, total, parts:{photos, plans, cert, rooms}, n:{photos, rooms, pts, meas}, edit} (in memory, this page only) */
+const szOwn = (P, col) => col==='rooms' || col==='ph' || !P.imgFrom;
+async function szMeasure(pid, prog){
+  const P = P_(pid)||{}, parts = {photos:0, plans:0, cert:0, rooms:JSON.stringify(P).length}, n = {photos:0, rooms:0, pts:0, meas:0}; let edit = '';
+  for(const col of bkCols(P)){
+    if(!szOwn(P, col)) continue;
+    prog && prog((P.name||pid)+' · '+col+'…');
+    const s = await S.db.collection('projects/'+pid+'/'+col).get();
+    s.docs.forEach(d => { const x = d.data(); if(x==null) return; const b = JSON.stringify(x).length;
+      if(col==='ph'){ parts.photos += b; n.photos++; }
+      else if(col==='rooms'){ parts.rooms += b; if(!x.deleted){ n.rooms++; (x.pts||[]).forEach(p => { n.pts++; if(num(p.v)!=null || p.na) n.meas++; }); } if(x.at && x.at > edit) edit = x.at; }
+      else if(col==='img' || col.startsWith('bg_')) parts.plans += b;
+      else parts.cert += b; });
+  }
+  const total = parts.photos+parts.plans+parts.cert+parts.rooms;
+  return SZ[pid] = {at:nowIso(), total, parts, n, edit};
+}
+const szMB = b => b < 1048576 ? Math.max(1, Math.round(b/1024))+' KB' : bkMB(b);
+const szDate = iso => { const d = new Date(iso); return isNaN(d) ? '' : d.toLocaleString('th-TH', {day:'numeric', month:'short', year:'2-digit', hour:'2-digit', minute:'2-digit'}); };
+/* backup status as the system knows it: only backups made with this app from v25.11 on leave a mark */
+function szBackup(P, m){
+  const lb = P && P.lastBackup && P.lastBackup.at;
+  if(!lb) return {tone:'low', txt:'ยังไม่เคย Backup (เท่าที่ระบบบันทึกไว้)'};
+  if(m && m.edit && m.edit > lb) return {tone:'low', txt:'Backup ล่าสุด '+szDate(lb)+' · มีการแก้ไขหลัง Backup นั้น'};
+  return {tone:'ok', txt:'Backup ล่าสุด '+szDate(lb)+(m ? ' · ไม่มีการแก้ไขหลังจากนั้น' : '')};
+}
+
+function sizeDlg(){
+  const projs = () => Object.values(S.projects).filter(P => projRole(P.id)==='admin').sort((a, b) => String(a.name||'').localeCompare(String(b.name||'')));
+  const msg = h('div',{class:'note',id:'sz-msg',role:'status'}), list = h('div',{class:'bk-list',id:'sz-list',style:'max-height:56vh'}), tot = h('div',{class:'note mono',id:'sz-tot'});
+  const paint = () => {
+    const ps = projs(), mx = Math.max(1, ...ps.map(P => (SZ[P.id]||{}).total||0)); let sum = 0, done = 0;
+    list.replaceChildren(...(ps.length ? ps.map(P => { const m = SZ[P.id]; if(m){ sum += m.total; done++; }
+      const bk = szBackup(P, m);
+      return h('div',{class:'bk-row','data-pid':P.id,style:'flex-direction:column;gap:6px'},
+        h('div',{class:'row',style:'width:100%;align-items:baseline'}, h('b',null, P.name||P.id), h('span',{class:'note'}, [P.code, P.demo ? 'ตัวอย่าง' : ''].filter(Boolean).join(' · ')), h('span',{class:'sp'}), h('b',{class:'mono sz-tot'}, m ? szMB(m.total) : 'กำลังวัด…')),
+        m ? h('div',{class:'bar',style:'width:100%'}, h('i',{style:'width:'+Math.max(1, Math.round(100*m.total/mx))+'%;background:var(--accent)'})) : null,
+        m ? h('div',{class:'note'}, [m.parts.photos ? 'รูป '+szMB(m.parts.photos)+' ('+m.n.photos+' ใบ)' : '', m.parts.plans ? 'แปลน/แบบ '+szMB(m.parts.plans) : '', m.parts.cert ? 'ใบ Cal + โลโก้ '+szMB(m.parts.cert) : '', 'ห้อง/จุด '+szMB(m.parts.rooms)+' ('+m.n.rooms+' ห้อง, '+m.n.meas+'/'+m.n.pts+' จุดวัดแล้ว)'].filter(Boolean).join(' · ')) : null,
+        P.imgFrom ? h('div',{class:'note'}, 'ใช้แบบ โลโก้ และใบ Cal ร่วมกับโครงการอื่น — ไม่นับในขนาดนี้') : null,
+        h('div',{class:'row',style:'gap:8px;flex-wrap:wrap'}, h('span',{class:'note',style:'color:'+(bk.tone==='low' ? 'var(--low)' : 'var(--ok)')}, bk.txt), h('span',{class:'sp'}),
+          h('button',{class:'btn sm',title:'ดาวน์โหลดไฟล์ Backup ของโครงการนี้','data-act':'bk',on:{click:() => backupDlg(P.id)}}, '💾 Backup'),
+          h('button',{class:'btn sm',title:'ลบโครงการนี้ถาวร (ต้องพิมพ์ชื่อยืนยัน)','data-act':'del',on:{click:() => delProjDlg(P.id, () => paint())}}, '🗑 ลบ…')));
+    }) : [h('div',{class:'note'},'ยังไม่มีโครงการ')]));
+    tot.textContent = 'รวม '+szMB(sum)+(done < ps.length ? ' (วัดแล้ว '+done+' จาก '+ps.length+' โครงการ)' : '');
+  };
+  let busy = false;
+  const run = async force => { if(busy) return; busy = true;
+    try{ for(const P of projs()){ if(!list.isConnected) break; if(!force && SZ[P.id]) continue; await szMeasure(P.id, s => { msg.textContent = 'กำลังวัด '+s; }).catch(e => { msg.textContent = 'วัดไม่สำเร็จ: '+errMsg(e); }); paint(); } if(list.isConnected && !/ไม่สำเร็จ/.test(msg.textContent)) msg.textContent = 'วัดเสร็จแล้ว · '+szDate(nowIso()); }
+    finally{ busy = false; } };
+  paint();
+  dialog('ขนาดข้อมูลแต่ละโครงการ', h('div',{class:'bk'},
+    h('div',{class:'note'}, window.AM_WEB ? 'ขนาดเป็นของข้อมูลจริงที่เก็บอยู่ (แพ็กเกจฟรีรวม 500 MB) · Backup เก็บไฟล์ไว้ก่อนลบเสมอ' : 'ขนาดเป็นของข้อมูลจริงที่เก็บอยู่ในหน้านี้ (จำกัด 100 MB) · ตัวนับ "Storage" ที่มุมบนของ claude.ai เป็นตัวตัดสินสุดท้าย อาจนับต่างจากตัวเลขนี้เล็กน้อย · Backup เก็บไฟล์ไว้ก่อนลบเสมอ'),
+    list, tot, msg),
+    cls => [h('button',{class:'btn',id:'sz-again',on:{click:() => run(true)}},'วัดใหม่'), h('button',{class:'btn primary',on:{click:cls}},'ปิด')]);
+  run(false);
+}
+
+/* delete a whole project: type its name to confirm; never touches a lender's drawings */
+async function szDelete(pid, prog){
+  const P = P_(pid)||{}; if(!P.id && !S.projects[pid]) throw new Error('ไม่พบโครงการ');
+  if(Object.values(S.projects).some(x => x.imgFrom===pid)) throw new Error('มีโครงการที่ยืมแบบจากโครงการนี้อยู่');
+  Object.keys(S.pend).forEach(k => { const p = S.pend[k]; if(p && (p.pid===pid || (p.kind==='p' && p.id===pid))){ clearTimeout(p.t); delete S.pend[k]; } });   /* a waiting write must not bring a room back */
+  let n = 0;
+  for(const col of bkCols(P)){
+    if(!szOwn(P, col)) continue;
+    const s = await S.db.collection('projects/'+pid+'/'+col).get(), ids = s.docs.map(d => d.id);
+    for(let i=0; i<ids.length; i+=6){ await Promise.all(ids.slice(i, i+6).map(id => S.db.doc('projects/'+pid+'/'+col+'/'+id).delete())); n += Math.min(6, ids.length-i); prog && prog((P.name||pid)+' · '+col+' · '+n+' ไฟล์'); }
+  }
+  await S.db.doc('projects/'+pid).delete();
+  if(S.unsub['r'+pid]){ try{ S.unsub['r'+pid](); }catch(e){ /* already closed */ } delete S.unsub['r'+pid]; }
+  delete S.rooms[pid]; delete S.rLoaded[pid]; delete S.projects[pid]; delete SZ[pid];
+  Object.keys(S.img).forEach(k => { if(k.includes(pid)) delete S.img[k]; }); Object.keys(S.ph||{}).forEach(k => { if(k.startsWith(pid+'/')) delete S.ph[k]; });
+  return n+1;
+}
+function delProjDlg(pid, after){
+  const P = S.projects[pid]; if(!P) return;
+  const lenders = Object.values(S.projects).filter(x => x.imgFrom===pid);
+  if(lenders.length){ dialog('ลบโครงการนี้ไม่ได้', h('div',{class:'bk'}, h('div',{class:'banner warn'}, 'โครงการ '+lenders.map(x => '"'+(x.name||x.id)+'"').join(', ')+' ใช้แบบ โลโก้ และใบ Cal ของ "'+(P.name||pid)+'" ร่วมกัน — ลบโครงการที่ยืมก่อน (หรือ Backup แล้วลบทั้งคู่) ไม่งั้นแบบของมันจะหายไปด้วย')), cls => [h('button',{class:'btn primary',on:{click:cls}},'เข้าใจแล้ว')]); return; }
+  const info = h('div',{class:'note',id:'dp-info'}, 'กำลังวัดขนาด…'), msg = h('div',{class:'note',id:'dp-msg',role:'status'});
+  const nm = h('input',{type:'text',id:'dp-name',autocomplete:'off',placeholder:P.name||'',style:'width:100%'});
+  const ack = h('input',{type:'checkbox',id:'dp-ack'}), ackRow = h('label',{class:'row',id:'dp-ackrow',style:'gap:8px;align-items:flex-start;display:none'}, ack, h('span',null, 'ยังไม่มี Backup ล่าสุดของโครงการนี้ — ฉันยอมรับว่าข้อมูลจะหายถาวร'));
+  const go = h('button',{class:'btn primary',id:'dp-go',style:'background:var(--low);border-color:var(--low)'}, '🗑 ลบโครงการนี้ถาวร');
+  const upd = () => { const ok = nm.value.trim().toLowerCase()===String(P.name||'').trim().toLowerCase() && (ackRow.style.display==='none' || ack.checked); go.disabled = !ok || go.dataset.busy==='1'; };
+  nm.addEventListener('input', upd); ack.addEventListener('change', upd); go.disabled = true;
+  go.addEventListener('click', async () => { go.dataset.busy = '1'; go.disabled = true; nm.disabled = true;
+    try{ const n = await szDelete(pid, s => { msg.textContent = 'กำลังลบ '+s; }); msg.textContent = 'ลบแล้ว '+n+' ไฟล์'; toast('ลบโครงการแล้ว'); if(S.route && S.route.pid===pid) go2({v:'home'}); close(); after && after(); renderSoon(); }
+    catch(e){ msg.textContent = 'ลบไม่สำเร็จ: '+errMsg(e)+' (บางส่วนอาจถูกลบไปแล้ว — เปิด Backup ที่เก็บไว้เพื่อกู้คืน)'; go.dataset.busy = '0'; nm.disabled = false; upd(); } });
+  const close = dialog('ลบโครงการ', h('div',{class:'bk'},
+    h('div',{class:'banner warn'}, h('b',null,'"'+(P.name||pid)+'"'), h('div',{class:'note'}, 'ลบถาวร ห้อง จุดวัด รูปถ่าย แปลน ใบ Cal และโลโก้ของโครงการนี้ทั้งหมด กู้คืนได้จากไฟล์ Backup เท่านั้น')),
+    info, h('div',{class:'row'}, h('button',{class:'btn',id:'dp-bk',on:{click:() => backupDlg(pid)}}, '💾 Backup ก่อนลบ')),
+    ackRow, h('label',{class:'fl'}, 'พิมพ์ชื่อโครงการเพื่อยืนยัน', nm), msg),
+    cls => [h('button',{class:'btn',on:{click:cls}},'ยกเลิก'), go]);
+  const show = m => { const bk = szBackup(P, m);
+    info.replaceChildren(h('div',null, m ? 'ขนาด '+szMB(m.total)+' · '+m.n.rooms+' ห้อง · วัดแล้ว '+m.n.meas+'/'+m.n.pts+' จุด · รูป '+m.n.photos+' ใบ' : ''), h('div',{style:'color:'+(bk.tone==='low' ? 'var(--low)' : 'var(--ok)')}, bk.txt));
+    ackRow.style.display = bk.tone==='low' ? '' : 'none'; upd(); };
+  (SZ[pid] ? Promise.resolve(SZ[pid]) : szMeasure(pid, s => { info.textContent = 'กำลังวัด '+s; })).then(show, e => { info.textContent = 'วัดขนาดไม่สำเร็จ: '+errMsg(e); ackRow.style.display = ''; upd(); });
+}
+const go2 = r => go(r);
 /* ---------- overlapping rooms: cut the smaller room out of the bigger one ----------
    For every room that overlaps a smaller room: raster the room (2 px per layout px), remove the smaller rooms,
    open 2 px (drops slivers), keep the largest piece, join any hole (a room fully inside) to the edge with a thin slit,
